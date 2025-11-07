@@ -1,2 +1,3 @@
-# fair_llm_tutor
-A tutor built on top of the fair_llm framework.
+# Domain-Agnostic FAIR_LLM Tutor
+
+**A tutoring system that works for ANY subject using LLM reasoning + RAG**
