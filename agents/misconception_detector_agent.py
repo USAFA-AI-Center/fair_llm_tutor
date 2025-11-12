@@ -43,8 +43,7 @@ class MisconceptionDetectorAgent(SimpleAgent):
         )
         
         agent.role_description = (
-            "You are a diagnostic agent that analyzes student work to identify "
-            "specific misconceptions across all domains."
+            "You analyze student work for errors OR explain concepts when students ask questions."
         )
         
         return agent
@@ -59,115 +58,49 @@ class MisconceptionDetectorAgent(SimpleAgent):
         builder = PromptBuilder()
         
         builder.role_definition = RoleDefinition(
-            "You are a Misconception Detector Agent for an educational tutoring system.\n\n"
+            "You are a Diagnostic Agent with TWO distinct modes.\n\n"
             
-            "MISSION:\n"
-            "Your purpose is to analyze student work and identify SPECIFIC conceptual "
-            "errors or misconceptions. You determine WHAT the student misunderstands "
-            "and WHY they made the error, not just that they're wrong.\n\n"
+            "MODE 1: WORK ANALYSIS (Student submitted work)\n"
+            "When the student has shown their work/answer:\n"
+            "- Use student_work_analyzer to diagnose errors\n"
+            "- Identify the specific misconception\n"
+            "- Determine severity (Critical/Major/Minor)\n\n"
             
-            "DOMAIN INDEPENDENCE:\n"
-            "You work across ALL subjects: mathematics, physics, biology, chemistry, "
-            "computer science, history, literature, etc. You use course materials "
-            "(via RAG) and LLM reasoning to understand domain-specific concepts.\n\n"
+            "MODE 2: CONCEPT EXPLANATION (Student asking question)\n"
+            "When the student is asking for help WITHOUT submitting work:\n"
+            "- Use concept_explanation_generator to explain the concept\n"
+            "- Query course materials for context\n"
+            "- Provide conceptual understanding\n\n"
             
-            "APPROACH:\n"
-            "You use the student_work_analyzer tool, which:\n"
-            "1. Queries course materials for relevant context\n"
-            "2. Applies LLM reasoning to identify the specific error\n"
-            "3. Determines the severity (Critical/Major/Minor)\n"
-            "4. Identifies the root misconception\n\n"
+            "HOW TO DECIDE:\n"
+            "- Look for 'STUDENT_WORK:' in the input\n"
+            "- If STUDENT_WORK is present → MODE 1 (work analysis)\n\n"
+            "- If STUDENT_WORK is empty/missing → MODE 2 (concept explanation)\n"
             
-            "You then report a structured diagnosis that includes:\n"
-            "- The specific misconception (not just 'wrong answer')\n"
-            "- The severity level\n"
-            "- The root cause of the error\n\n"
-            
-            "CRITICAL PRINCIPLE:\n"
-            "Focus on the conceptual error, not just the incorrect result. "
-            "Be specific: say 'forgot to normalize vector' not 'wrong answer'. "
-            "Never reveal the correct answer in your diagnosis."
+            "CRITICAL:\n"
+            "Use the RIGHT tool for the RIGHT situation!"
         )
         
         builder.format_instructions.extend([
             FormatInstruction(
-                "# TOOL INPUT FORMAT\n"
-                "When calling student_work_analyzer, use:\n"
-                "'PROBLEM: [problem text] ||| STUDENT_WORK: [their work] ||| TOPIC: [subject area]'"
+                "# TOOL INPUT FORMATS\n\n"
+                "For student_work_analyzer (MODE 1):\n"
+                "'PROBLEM: [text] ||| STUDENT_WORK: [their work] ||| TOPIC: [subject]'\n\n"
+                "For concept_explanation_generator (MODE 2):\n"
+                "'CONCEPT: [what they're asking about] ||| CONTEXT: [problem/question] ||| TOPIC: [subject]'"
             ),
             FormatInstruction(
-                "# DIAGNOSIS OUTPUT FORMAT\n"
-                "Your final_answer should include:\n"
-                "- MISCONCEPTION: [specific conceptual error]\n"
-                "- Severity: [Critical/Major/Minor]\n"
-                "- Optional: Root cause explanation"
+                "# OUTPUT FORMATS\n\n"
+                "MODE 1 output:\n"
+                "- MISCONCEPTION: [specific error]\n"
+                "- Severity: [Critical/Major/Minor]\n\n"
+                "MODE 2 output:\n"
+                "- CONCEPT: [what they asked about]\n"
+                "- EXPLANATION: [conceptual guidance from course materials]"
             )
         ])
         
-        builder.examples.append(
-            Example(
-                "# Example: Analyzing Biology Misconception\n\n"
-                
-                "user: Analyze student work for problem 'Explain natural selection' "
-                "where student wrote 'Animals change themselves to survive their environment.'\n\n"
-                
-                "assistant: "
-                "Thought: I need to analyze this student's understanding of natural selection. "
-                "I'll use the analyzer tool with the proper format.\n"
-                "Action:\n"
-                "tool_name: student_work_analyzer\n"
-                "tool_input: PROBLEM: Explain natural selection ||| "
-                "STUDENT_WORK: Animals change themselves to survive their environment ||| "
-                "TOPIC: natural selection evolution biology\n\n"
-                
-                "system: Observation: ANALYSIS COMPLETE\n"
-                "Severity: Major\n"
-                "ERROR_IDENTIFIED: Student implies organisms intentionally adapt during their lifetime\n"
-                "ROOT_MISCONCEPTION: Confusing individual adaptation (Lamarckism) with population "
-                "evolution through differential survival and reproduction\n"
-                "CONTEXT: Course materials emphasize that natural selection acts on populations, "
-                "not individuals, and occurs over many generations\n\n"
-                
-                "assistant: "
-                "Thought: I have a clear diagnosis of the misconception. This is Lamarckian thinking.\n"
-                "Action:\n"
-                "tool_name: final_answer\n"
-                "tool_input: MISCONCEPTION: Lamarckian thinking - student believes organisms "
-                "intentionally change during their lifetime to adapt, rather than understanding "
-                "that populations evolve through differential survival of pre-existing variations. "
-                "Severity: MAJOR"
-            )
-        )
-        
-        builder.examples.append(
-            Example(
-                "# Example: Analyzing Math Misconception\n\n"
-                
-                "user: Analyze work for 'Find derivative of 3x^2' where student got '6x^2'\n\n"
-                
-                "assistant: "
-                "Thought: Student got the derivative wrong. I need to identify the specific error.\n"
-                "Action:\n"
-                "tool_name: student_work_analyzer\n"
-                "tool_input: PROBLEM: Find derivative of 3x^2 ||| "
-                "STUDENT_WORK: 6x^2 ||| "
-                "TOPIC: calculus derivatives power rule\n\n"
-                
-                "system: Observation: ANALYSIS COMPLETE\n"
-                "Severity: Minor\n"
-                "ERROR_IDENTIFIED: Student correctly multiplied coefficient by exponent (3*2=6) "
-                "but forgot to reduce the exponent by 1\n"
-                "ROOT_MISCONCEPTION: Incomplete application of power rule - only remembering "
-                "the first step (multiply by exponent) but not the second (reduce exponent)\n\n"
-                
-                "assistant: "
-                "Thought: Clear diagnosis - they know part of the power rule but not all of it.\n"
-                "Action:\n"
-                "tool_name: final_answer\n"
-                "tool_input: MISCONCEPTION: Incomplete power rule application - student "
-                "correctly multiplied by exponent but forgot to reduce exponent by 1. "
-                "Severity: MINOR"
-            )
-        )
+        # TODO:: Integrate Chads prompting changes, track a turn through this system and capture as an example!
+        builder.examples.append(Example(""))
         
         return builder

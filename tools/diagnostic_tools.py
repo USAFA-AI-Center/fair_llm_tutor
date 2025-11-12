@@ -1,19 +1,9 @@
-"""
-LLM+RAG Powered Diagnostic Tools
-
-These tools use LLM reasoning combined with course materials (RAG) to:
-- Analyze student work
-- Identify misconceptions
-- Ground diagnosis in actual course content
-
-Works for any domain because it adapts to the course materials provided.
-"""
+# diagnostic_tools.py
 
 from fairlib.core.interfaces.tools import AbstractTool
 from fairlib.core.interfaces.llm import AbstractChatModel
 from fairlib.core.message import Message
 from fairlib.core.interfaces.memory import AbstractRetriever
-
 
 class StudentWorkAnalyzerTool(AbstractTool):
     """
@@ -22,8 +12,8 @@ class StudentWorkAnalyzerTool(AbstractTool):
     
     name = "student_work_analyzer"
     description = (
-        "Analyzes student work to identify specific misconceptions. "
-        "Uses course materials as reference. Works for any subject domain. "
+        "Analyzes student work to identify specific misconceptions."
+        "Uses course materials as reference. Works for any subject domain."
         "Input format: 'PROBLEM: [text] ||| STUDENT_WORK: [text] ||| TOPIC: [text]'"
     )
     
@@ -81,7 +71,7 @@ Analyze the student's work carefully:
 4. What severity is this error? (Critical/Major/Minor)
 
 Respond in this EXACT format:
-CORRECT_ASPECTS: [What they did right - be specific]
+CORRECT_ASPECTS: [What they did right - be specific, if nothing was done right, state that here]
 ERROR_IDENTIFIED: [The specific mistake - be precise]
 ROOT_MISCONCEPTION: [The underlying concept misunderstood]
 SEVERITY: [Critical, Major, or Minor]
@@ -123,7 +113,6 @@ EVIDENCE: [Quote from student work showing the error]"""
         else:
             return "Major"
 
-#TODO:: PROMPT THE AGENT TO USE THIS IN THE CASE THAT A STUDENT IS SIMPLY ASKING A QUESTION AND NOT SUBMITTING ANY WORK.
 class ConceptExplanationGeneratorTool(AbstractTool):
     """
     Retrieves and synthesizes concept explanations from course materials.
@@ -133,7 +122,7 @@ class ConceptExplanationGeneratorTool(AbstractTool):
     name = "concept_explanation_generator"
     description = (
         "Retrieves concept explanations from course materials and synthesizes them. "
-        "Input: concept or topic name to explain"
+        "Input format: concept or topic name to explain"
     )
     
     def __init__(self, llm: AbstractChatModel, retriever: AbstractRetriever):

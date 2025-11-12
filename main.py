@@ -1,5 +1,5 @@
 #TODO:: Test with RAG against an entire textbook
-#TODO:: Not consistently calling tools of sub agents
+#TODO:: make sure the overall prompting is not geared as much towards math, a lot of the prompting is specific to calculus
 
 """
 Domain-Agnostic Tutor Driver with RAG
@@ -37,7 +37,6 @@ except ImportError:
 from fairlib import (
     Document,
     HuggingFaceAdapter,
-    OpenAIAdapter,
     WorkingMemory,
     ChromaDBVectorStore,
     SentenceTransformerEmbedder,
@@ -56,7 +55,7 @@ from agents.manager_agent import TutorManagerAgent
 
 class TutorSession:
     """
-    Main tutoring session that works for ANY domain.
+    Main tutoring session.
     
     Loads course materials, creates RAG-enabled agents, and provides
     interactive tutoring interface.
@@ -226,11 +225,8 @@ class TutorSession:
         return response
     
     async def interactive_loop(self):
-        """Main interactive loop"""
         print("\n" + "*" * 30)
-        print("\nWelcome to Domain-Agnostic FAIR_LLM Tutor!")
-        print("I can help you learn ANY subject - just tell me what you're working on.")
-        print("Show me your work and I'll guide you to understanding.")
+        print("\nWelcome to the FAIR_LLM Tutor!")
         print("\nCommands:")
         print("  'help' - Show available commands")
         print("  'topic [name]' - Set the current topic")
@@ -297,8 +293,7 @@ class TutorSession:
 
 
 async def main():
-    """Main entry point"""
-    parser = argparse.ArgumentParser(description="Domain-Agnostic Tutor with RAG")
+    parser = argparse.ArgumentParser()
     parser.add_argument(
         "--course_materials",
         type=str,

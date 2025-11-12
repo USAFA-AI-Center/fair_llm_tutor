@@ -1,6 +1,4 @@
-"""
-LLM-Powered Safety Tools
-"""
+# safety_tools.py 
 
 from fairlib.core.interfaces.tools import AbstractTool
 from fairlib.core.interfaces.llm import AbstractChatModel
@@ -9,13 +7,6 @@ from fairlib.core.message import Message
 class AnswerRevelationAnalyzerTool(AbstractTool):
     """
     Uses LLM reasoning to determine if a response reveals an answer.
-    Domain independent - works for any subject.
-    
-    Much more robust than regex patterns because:
-    - Understands semantics and context
-    - Can detect indirect revelation
-    - Adapts to any domain
-    - Handles novel cases
     """
     
     name = "answer_revelation_analyzer"
@@ -38,8 +29,6 @@ class AnswerRevelationAnalyzerTool(AbstractTool):
     def use(self, tool_input: str) -> str:
         """
         Analyze if response reveals answer using LLM reasoning.
-        
-        Returns structured verdict that agents can parse.
         """
         try:
             # Parse input
@@ -122,56 +111,3 @@ CONFIDENCE: [High, Medium, or Low]"""
         
         # Default to SAFE if unclear (conservative for guiding questions)
         return "SAFE"
-
-
-class SemanticAnswerMatcherTool(AbstractTool):
-    """
-    Uses LLM to check semantic similarity between response and answer.
-    More sophisticated than string matching.
-    """
-    
-    name = "semantic_answer_matcher"
-    description = (
-        "Uses LLM to determine if a response is semantically similar to the correct answer. "
-        "Catches indirect or paraphrased answer revelation. "
-        "Input format: 'CORRECT_ANSWER: [text] ||| PROPOSED_RESPONSE: [text]'"
-    )
-    
-    def __init__(self, llm: AbstractChatModel):
-        self.llm = llm
-    
-    def use(self, tool_input: str) -> str:
-        """Check semantic similarity using LLM"""
-        try:
-            parts = tool_input.split("|||")
-            if len(parts) < 2:
-                return "ERROR: Invalid input format"
-            
-            correct_answer = parts[0].replace("CORRECT_ANSWER:", "").strip()
-            proposed_response = parts[1].replace("PROPOSED_RESPONSE:", "").strip()
-            
-            prompt = f"""Compare these two texts for semantic similarity:
-
-CORRECT ANSWER: {correct_answer}
-
-PROPOSED RESPONSE: {proposed_response}
-
-Does the proposed response contain or reveal the correct answer (directly or indirectly)?
-Consider paraphrasing, equivalent expressions, and implicit revelation.
-
-Respond in this format:
-SIMILARITY: [High, Medium, or Low]
-EXPLANATION: [Brief explanation]"""
-
-            messages = [Message(role="user", content=prompt)]
-            response = self.llm.invoke(messages)
-            result = response.content.strip()
-            
-            # Parse similarity
-            if "HIGH" in result.upper():
-                return f"UNSAFE - High semantic similarity to answer.\n\n{result}"
-            else:
-                return f"SAFE - Low semantic similarity.\n\n{result}"
-                
-        except Exception as e:
-            return f"ERROR: Analysis failed. {str(e)}"
