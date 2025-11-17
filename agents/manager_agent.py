@@ -78,6 +78,23 @@ class TutorManagerAgent(SimpleAgent):
             "- Always include complete context in delegations\n"
             "- Always provide a clear answer to the student, either a concept explanation or a hint!\n"
         )
+
+        builder.format_instructions.extend([
+            FormatInstruction(
+                "# --- RESPONSE FORMAT ---\n"
+                "Your response MUST contain EXACTLY ONE 'Thought' and ONE 'Action' block.\n"
+                "The Action MUST be a single JSON object with 'tool_name' and 'tool_input'."
+            ),
+            FormatInstruction(
+                "# --- YOUR DECISION PROCESS ---\n"
+                "On every turn, you must follow these steps:\n"
+                "1. Look at the original 'User Request' to understand the overall goal.\n"
+                "2. Look at the MOST RECENT message in the history. It will be a 'Tool Observation' from a worker if you have delegated a task.\n"
+                "3. **Decide:** Based on the observation and the overall goal, what is the very next logical step? \n"
+                "   - If you need more information to meet the goal, delegate the next sub-task to the correct worker.\n"
+                "   - If the observation gives you all the information needed to complete the goal, use the 'final_answer' tool to provide the complete, synthesized answer."
+            )
+        ])
         
         builder.format_instructions.extend([
             FormatInstruction(

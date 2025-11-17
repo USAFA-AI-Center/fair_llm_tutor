@@ -88,10 +88,11 @@ class TutorSession:
         # Initialize LLM
         print("\nLoading language model...")
         self.llm = HuggingFaceAdapter(
-            model_name="dolphin3-qwen25-3b",
+            model_name="google/gemma-3-27b-it",
             quantized=False,
             stream=False,
-            verbose=False
+            verbose=False,
+            auth_token="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"
         )
         
         # Build agent team

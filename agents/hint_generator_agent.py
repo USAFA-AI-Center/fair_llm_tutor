@@ -105,6 +105,27 @@ class HintGeneratorAgent(SimpleAgent):
                 "4. Reference their exact approach/notation\n"
                 "5. Encourage them to try again"
         )
+
+        builder.format_instructions.extend([
+            FormatInstruction(
+                "# --- RESPONSE FORMAT (MANDATORY JSON) ---\n"
+                "Your entire response MUST be a single, valid JSON object.\n"
+                "This JSON object MUST have exactly two top-level keys: 'thought' and 'action'.\n\n"
+                "1.  `thought`: A string explaining your reasoning for the current step.\n"
+                "2.  `action`: An object containing the tool you will use, with two keys:\n"
+                "    -   `tool_name`: The string name of the tool to use (e.g., 'safe_calculator' or 'final_answer').\n"
+                "    -   `tool_input`: The string input for that tool."
+            ),
+            FormatInstruction(
+                "# --- JSON RULES ---\n"
+                "- ALWAYS use double quotes for all keys and string values.\n"
+                "- Do NOT include any text or markdown formatting (like ```json) outside of the main JSON object."
+            ),
+                FormatInstruction(
+            "# --- ABSOLUTE RULE ---\n"
+            "Under NO circumstances should you ever respond with anything other than the JSON object described above. Your adherence to this format is non-negotiable."
+        )
+        ])
         
         builder.format_instructions.extend([
             FormatInstruction(
