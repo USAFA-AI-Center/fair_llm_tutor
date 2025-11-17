@@ -25,6 +25,7 @@ import sys
 import argparse
 from pathlib import Path
 from typing import List
+import torch
 
 try:
     import chromadb
@@ -88,11 +89,11 @@ class TutorSession:
         # Initialize LLM
         print("\nLoading language model...")
         self.llm = HuggingFaceAdapter(
-            model_name="google/gemma-3-27b-it",
+            model_name="Qwen/Qwen2.5-14B-Instruct",
             quantized=False,
             stream=False,
             verbose=False,
-            auth_token="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"
+            auth_token=""
         )
         
         # Build agent team

@@ -38,7 +38,7 @@ class MisconceptionDetectorAgent(SimpleAgent):
             planner=planner,
             tool_executor=executor,
             memory=memory,
-            max_steps=8,
+            max_steps=10,
             stateless=True
         )
         
