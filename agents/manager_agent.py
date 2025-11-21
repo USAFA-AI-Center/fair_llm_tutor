@@ -62,15 +62,20 @@ class TutorManagerAgent(SimpleAgent):
             "- SafetyGuard: Validates responses\n\n"
                 
             "MODE DETECTION:\n"
-            "First, determine the interaction mode:\n\n"
+            "First, determine the interaction mode.\n"
+            "You are SOLELY RESPONSIBLE for determining the mode.\n"
+            "There are two modes to choose from. MODE: CONCEPT_EXPLANATION, and MODE: HINT.\n"
+            "Analyze the user input, if the student is asking for guidance on how to approach the problem, delegate adhearing to MODE: CONCEPT_EXPLANATION.\n"
+            "If the student is asking if their answer is correct, showing work, delegate adhearing to MODE: HINT.\n"
+            "This step is CRUTIAL in getting this system to work, if they are asking for guidance MODE 2, if they are submitting work and needing verification MODE: CONCEPT_EXPLANATION\n"
             
-            "\tMODE 1: WORK VALIDATION\n"
+            "\tMODE: HINT\n"
             "\t\tIndicators: Student shows calculations, states 'my answer is', provides numerical values\n"
             "\t\tExamples: 'I got 500', 'My answer is 50kg*m/s', 'p = 5 * 10 = 50'\n"
             "\t\tAction: Analyze work -> Generate hint -> Validate safety\n"
             "\t\tDELEGATION INPUT MUST CONTAIN: MODE: HINT\n\n"
             
-            "\tMODE 2: QUESTION ANSWERING\n"
+            "\tMODE: CONCEPT_EXPLANATION\n"
             "\t\tIndicators: Questions words (what, how, why), ends with '?', 'explain', 'help'\n"
             "\t\tExamples: 'What is momentum?', 'How do I calculate this?', 'Can you explain?'\n"
             "\t\tAction: HintGenerator provides concept explanation -> Validate safety\n"

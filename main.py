@@ -217,7 +217,7 @@ class TutorSession:
             f"STUDENT WORK: {student_work}\n\n"
             f"TOPIC: {topic}\n\n"
             f"Please analyze the student's work, identify any misconceptions, "
-            f"and provide an appropriate hint. Remember: NEVER reveal the answer!"
+            f"and provide an appropriate hint or concept explanation. Remember: NEVER reveal the answer!"
         )
         
         print("\nAnalyzing your work...")
