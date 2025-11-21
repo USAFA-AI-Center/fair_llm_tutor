@@ -8,7 +8,7 @@ from fairlib.modules.action.executor import ToolExecutor
 from fairlib.modules.action.tools.registry import ToolRegistry
 from fairlib.core.interfaces.memory import AbstractRetriever
 
-from tools.diagnostic_tools import StudentWorkAnalyzerTool, ConceptExplanationGeneratorTool
+from tools.diagnostic_tools import StudentWorkAnalyzerTool
 
 
 class MisconceptionDetectorAgent(SimpleAgent):
@@ -23,7 +23,6 @@ class MisconceptionDetectorAgent(SimpleAgent):
         
         tool_registry = ToolRegistry()
         tool_registry.register_tool(StudentWorkAnalyzerTool(llm, retriever))
-        tool_registry.register_tool(ConceptExplanationGeneratorTool(llm, retriever))
         
         planner = ReActPlanner(
             llm, 

@@ -41,7 +41,8 @@ from fairlib import (
     WorkingMemory,
     ChromaDBVectorStore,
     SentenceTransformerEmbedder,
-    SimpleRetriever
+    SimpleRetriever,
+    OpenAIAdapter
 )
 
 from fairlib.utils.document_processor import DocumentProcessor
