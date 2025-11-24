@@ -130,7 +130,7 @@ CORRECT ANSWER (for your reference only): {correct_answer}
 
 PROPOSED RESPONSE TO VALIDATE: {proposed_response}
 
-CRITICAL RULE (IMPROVEMENT #1):
+CRITICAL RULE:
 If the student has ALREADY stated the correct answer in their history, then it is SAFE to:
 - Confirm their answer is correct
 - Reference the specific value they provided

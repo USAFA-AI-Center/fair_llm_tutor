@@ -283,14 +283,6 @@ IF YOU USE ANY LATEX NOTATION, THE SYSTEM WILL CRASH AND THE STUDENT WILL SEE AN
     5. NEVER reveal the final answer
     6. NEVER complete the work for them
 
-    FORMATTING RULES (CRITICAL):
-    7. DO NOT use LaTeX notation at all (no backslashes: \\, \\times, \\(, \\), etc.)
-    8. Instead of LaTeX, write formulas naturally:
-    - Use: "p = m * v" or "p = m times v"
-    - NOT: "\\( p = m \\times v \\)"
-    9. For variables, just use plain letters: p, m, v, x, y
-    10. This is MANDATORY because your output will be embedded in JSON
-
     HINT LEVEL GUIDANCE:
     - Level 1: "Remember the definition of [concept]"
     - Level 2: "Think about the relationship between [concepts]"

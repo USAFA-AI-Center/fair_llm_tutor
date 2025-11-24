@@ -94,7 +94,9 @@ class TutorSession:
             quantized=False,
             stream=False,
             verbose=False,
-            auth_token=""
+            max_new_tokens=1000,
+            auth_token="",
+
         )
         
         # Build agent team
