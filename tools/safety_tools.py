@@ -1,10 +1,13 @@
-# safety_tools.py 
+# safety_tools.py
+
+import logging
+import re
 
 from fairlib.core.interfaces.tools import AbstractTool
 from fairlib.core.interfaces.llm import AbstractChatModel
 from fairlib.core.message import Message
 
-import re
+logger = logging.getLogger(__name__)
 
 class AnswerRevelationAnalyzerTool(AbstractTool):
     """
@@ -49,20 +52,18 @@ class AnswerRevelationAnalyzerTool(AbstractTool):
         submissions = [s.strip() for s in history_clean.split(',') if s.strip()]
         
         for submission in submissions:
-            unit_patterns = [
-                r'(\d+(?:\.\d+)?)\s*kg\s*[·\*]?\s*m\s*/\s*s',
-                r'(\d+(?:\.\d+)?)\s*N(?:\s|$)',
-                r'(\d+(?:\.\d+)?)\s*J(?:\s|$)',
-                r'(\d+(?:\.\d+)?)\s*m/s(?:\s|$)',
-            ]
-            
-            for pattern in unit_patterns:
-                if re.search(pattern, submission, re.IGNORECASE):
-                    student_answers.append(submission)
-                    break
-            
-            # Also check for statements like "my answer is X" or "I got X"
-            if re.search(r'(?:answer|got|calculated|result).*\d+', submission, re.IGNORECASE):
+            # Domain-agnostic: detect any number with optional units (word after number)
+            if re.search(r'\d+(?:\.\d+)?\s*[a-zA-Z/·\*]+', submission, re.IGNORECASE):
+                student_answers.append(submission)
+                continue
+
+            # Check for answer-indicator keywords with numbers
+            if re.search(r'(?:answer|got|calculated|result|equals|is)\s*[=:]?\s*\S+', submission, re.IGNORECASE):
+                student_answers.append(submission)
+                continue
+
+            # Standalone numeric answer
+            if re.search(r'^\s*-?\d+(?:\.\d+)?\s*$', submission.strip()):
                 student_answers.append(submission)
         
         return student_answers
@@ -112,10 +113,6 @@ class AnswerRevelationAnalyzerTool(AbstractTool):
                     if correct_normalized in student_normalized or student_normalized in correct_normalized:
                         student_already_answered = True
                         break
-            
-            problem = parts[0].replace("PROBLEM:", "").strip()
-            correct_answer = parts[1].replace("CORRECT_ANSWER:", "").strip()
-            proposed_response = parts[2].replace("PROPOSED_RESPONSE:", "").strip()
             
             # Create reasoning prompt for LLM with history context
             analysis_prompt = f"""You are a safety validator for a tutoring system. Your job is to determine if a proposed response reveals the answer to a problem.
@@ -175,6 +172,7 @@ CONFIDENCE: [High, Medium, or Low]"""
                 return f"SAFE - Response does not reveal answer.\n\n{result}"
                 
         except Exception as e:
+            logger.error(f"Safety analysis failed: {e}", exc_info=True)
             return f"ERROR: Analysis failed. {str(e)}"
     
     # TODO:: may need this to be improved as well, still weak parsing rules
@@ -203,5 +201,5 @@ CONFIDENCE: [High, Medium, or Low]"""
         if "UNSAFE" in response_upper and not student_already_answered:
             return "UNSAFE"
         
-        # Default to SAFE if unclear
-        return "SAFE"
+        # Default to UNSAFE if unclear (conservative)
+        return "UNSAFE"

@@ -1,7 +1,7 @@
 python-dotenv>=1.1.0
-rich>=14.0.0  # For nice terminal output in verify script
-anthropic>=0.5.0 # for some demos
-faiss-cpu>=1.7.0 # for the FAISS demo
-seaborn>=0.13.0 # for the graphing demo
-fair-llm>=0.1 # fair package
+rich>=14.0.0
+chromadb>=0.4.0
+sentence-transformers>=2.2.0
+pyyaml>=6.0.0
+fair-llm>=0.2.0
 pytest>=8.0.0

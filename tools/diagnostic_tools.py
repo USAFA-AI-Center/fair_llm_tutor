@@ -1,10 +1,14 @@
 # diagnostic_tools.py
 
+import logging
+import re
+
 from fairlib.core.interfaces.tools import AbstractTool
 from fairlib.core.interfaces.llm import AbstractChatModel
 from fairlib.core.message import Message
 from fairlib.core.interfaces.memory import AbstractRetriever
-import re
+
+logger = logging.getLogger(__name__)
 
 class StudentWorkAnalyzerTool(AbstractTool):
     """
@@ -29,46 +33,18 @@ class StudentWorkAnalyzerTool(AbstractTool):
         self.llm = llm
         self.retriever = retriever
 
-    # TODO:: are there models that are tuned for this type of task?
     def _extract_units_from_work(self, student_work: str) -> list:
         """
-        Extract and normalize units from student work.
-        Handles various formats: kg*m/s, kg·m/s, kg m/s, etc.
+        Extract values with units from student work.
+        Domain-agnostic: matches any number followed by letter-based units.
         """
         units_found = []
-        
-        # Common unit patterns for physics/math
-        unit_patterns = [
-            # Momentum patterns
-            r'(\d+(?:\.\d+)?)\s*kg\s*[·\*]?\s*m\s*/\s*s',  # kg*m/s variations
-            r'(\d+(?:\.\d+)?)\s*kg\s*m\s*/\s*s',           # kg m/s
-            r'(\d+(?:\.\d+)?)\s*kg·m/s',                   # kg·m/s
-            r'(\d+(?:\.\d+)?)\s*kg\*m/s',                  # kg*m/s
-            r'(\d+(?:\.\d+)?)\s*N\s*[·\*]?\s*s',           # N*s (also momentum)
-            
-            # Force patterns
-            r'(\d+(?:\.\d+)?)\s*N(?![a-zA-Z])',            # Newtons
-            r'(\d+(?:\.\d+)?)\s*kN(?![a-zA-Z])',           # kiloNewtons
-            
-            # Energy patterns
-            r'(\d+(?:\.\d+)?)\s*J(?![a-zA-Z])',            # Joules
-            r'(\d+(?:\.\d+)?)\s*kJ(?![a-zA-Z])',           # kiloJoules
-            
-            # Basic units
-            r'(\d+(?:\.\d+)?)\s*kg(?![a-zA-Z])',           # kilograms
-            r'(\d+(?:\.\d+)?)\s*m/s(?![a-zA-Z])',          # meters per second
-            r'(\d+(?:\.\d+)?)\s*m(?![a-zA-Z])',            # meters
-            r'(\d+(?:\.\d+)?)\s*s(?![a-zA-Z])',            # seconds
-        ]
-        
-        for pattern in unit_patterns:
-            matches = re.findall(pattern, student_work, re.IGNORECASE)
-            if matches:
-                # Store the full match with normalized format
-                full_matches = re.finditer(pattern, student_work, re.IGNORECASE)
-                for match in full_matches:
-                    units_found.append(match.group(0))
-        
+
+        # Generic pattern: number followed by unit-like text (letters, /, *, etc.)
+        pattern = r'(\d+(?:\.\d+)?)\s*([a-zA-Z][a-zA-Z·\*/\s]{0,20})'
+        for match in re.finditer(pattern, student_work):
+            units_found.append(match.group(0).strip())
+
         return units_found
     
     # TODO:: are there models that are tuned for this type of task?
@@ -128,7 +104,7 @@ class StudentWorkAnalyzerTool(AbstractTool):
 
             # Query course materials for relevant context
             kb_query = f"Common errors and misconceptions in {topic}: {problem}"
-            relevant_docs = self.retriever.retrieve(kb_query, k=3)
+            relevant_docs = self.retriever.retrieve(kb_query, top_k=3)
             
             # Extract content from retrieved documents
             course_context = "\n\n".join([
@@ -182,6 +158,7 @@ EVIDENCE: [Quote from student work showing the error or success]
             return f"ANALYSIS COMPLETE - Severity: {severity}\n\n{result}"
             
         except Exception as e:
+            logger.error(f"Diagnostic analysis failed: {e}", exc_info=True)
             return f"ERROR: Analysis failed. {str(e)}"
     
     def _extract_severity(self, llm_response: str) -> str:

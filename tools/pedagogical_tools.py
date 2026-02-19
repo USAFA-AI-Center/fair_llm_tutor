@@ -1,9 +1,13 @@
 # pedagogical_tools.py
 
+import logging
+
 from fairlib.core.interfaces.tools import AbstractTool
 from fairlib.core.interfaces.llm import AbstractChatModel
 from fairlib.core.interfaces.memory import AbstractRetriever
 from fairlib.core.message import Message
+
+logger = logging.getLogger(__name__)
 
 class SocraticHintGeneratorTool(AbstractTool):
     """
@@ -86,8 +90,9 @@ class SocraticHintGeneratorTool(AbstractTool):
                         for i, doc in enumerate(docs)
                     ])
             except Exception:
+                logger.warning("Failed to retrieve docs for concept explanation", exc_info=True)
                 relevant_docs = ""
-        
+
         prompt = f"""You are a helpful tutor providing a clear concept explanation.
 
 STUDENT QUESTION: {question}
@@ -156,8 +161,9 @@ Focus on conceptual understanding.
                 if docs:
                     relevant_docs = "\n".join([str(doc)[:200] for doc in docs[:2]])
             except Exception:
+                logger.warning("Failed to retrieve docs for hint generation", exc_info=True)
                 relevant_docs = ""
-        
+
         # Create prompt for LLM that includes student work
         prompt = self._create_hint_generation_prompt(
             problem=problem,
@@ -223,43 +229,14 @@ Create a response that:
             4: "Directed guidance - specific about what to check"
         }
 
-        latex_warning = """
-CRITICAL JSON SAFETY RULES - VIOLATION WILL BREAK THE SYSTEM:
-================================================
-YOUR OUTPUT WILL BE EMBEDDED IN JSON. FOLLOW THESE RULES OR THE SYSTEM WILL CRASH:
-
-1. ABSOLUTELY NO LATEX NOTATION - NONE AT ALL:
-   NEVER write: \(x\) or \(2x + 5 = 15\)
-   INSTEAD write: x or 2x + 5 = 15
-   
-   NEVER write: \\times, \\cdot, \\frac, \\sqrt
-   INSTEAD write: *, ·, /, sqrt()
-
-2. NO BACKSLASHES EXCEPT FOR QUOTES:
-   NEVER: Any \symbol or \command
-   ONLY EXCEPTION: \' for quotes in contractions
-
-3. WRITE ALL MATH IN PLAIN TEXT:
-   WRONG: "isolate \(x\) in the equation \(2x + 5 = 15\)"
-   RIGHT: "isolate x in the equation 2x + 5 = 15"
-   
-   WRONG: "calculate \(p = m \\times v\)"
-   RIGHT: "calculate p = m * v" or "calculate p = m * v"
-
-4. EXAMPLES OF SAFE MATHEMATICAL EXPRESSIONS:
-   - "x = 5"
-   - "2x + 5 = 15"
-   - "p = m * v"
-   - "Force equals mass times acceleration (F = ma)"
-   - "The derivative of x^2 is 2x"
-   - "sqrt(16) = 4"
-
-IF YOU USE ANY LATEX NOTATION, THE SYSTEM WILL CRASH AND THE STUDENT WILL SEE AN ERROR.
-================================================
-"""
+        math_format_note = (
+            "IMPORTANT: Write all math in plain text, not LaTeX. "
+            "For example, write 'p = m * v' instead of '\\(p = m \\times v\\)'. "
+            "Use *, /, ^, sqrt() for mathematical operations."
+        )
         
-        return f"""{latex_warning}
-        
+        return f"""{math_format_note}
+
     You are a Socratic tutor creating a hint for a student.
 
     CONTEXT:

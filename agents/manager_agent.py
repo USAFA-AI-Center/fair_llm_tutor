@@ -65,9 +65,9 @@ class TutorManagerAgent(SimpleAgent):
             "First, determine the interaction mode.\n"
             "You are SOLELY RESPONSIBLE for determining the mode.\n"
             "There are two modes to choose from. MODE: CONCEPT_EXPLANATION, and MODE: HINT.\n"
-            "Analyze the user input, if the student is asking for guidance on how to approach the problem, delegate adhearing to MODE: CONCEPT_EXPLANATION.\n"
-            "If the student is asking if their answer is correct, showing work, delegate adhearing to MODE: HINT.\n"
-            "This step is CRUTIAL in getting this system to work, if they are asking for guidance MODE 2, if they are submitting work and needing verification MODE: CONCEPT_EXPLANATION\n"
+            "Analyze the user input. If the student is asking for guidance on how to approach the problem, delegate adhering to MODE: CONCEPT_EXPLANATION.\n"
+            "If the student is asking if their answer is correct, showing work, or submitting calculations, delegate adhering to MODE: HINT.\n"
+            "This step is CRUCIAL in getting this system to work. If they are asking for guidance, route to MODE: CONCEPT_EXPLANATION. If they are submitting work and needing verification, route to MODE: HINT.\n"
             
             "\tMODE: HINT\n"
             "\t\tIndicators: Student shows calculations, states 'my answer is', provides numerical values\n"
@@ -119,7 +119,7 @@ class TutorManagerAgent(SimpleAgent):
                 "3. Decide mode and route accordingly\n\n"
                 
                 "Include MODE in your delegations:\n"
-                "- Add 'MODE: WORK_VALIDATION' or 'MODE: QUESTION_ANSWERING'"
+                "- Add 'MODE: HINT' or 'MODE: CONCEPT_EXPLANATION'"
             )
         ])
         
@@ -155,58 +155,90 @@ class TutorManagerAgent(SimpleAgent):
         builder.examples.extend([
             Example(
                 "User Request: Student says: 'I calculated 50kg*m/s'\n\n"
-                
-                "Thought: This is MODE 1 (WORK VALIDATION) - student is showing their calculated answer with units. "
+
+                "Thought: This is MODE: HINT - student is showing their calculated answer with units. "
                 "I need to analyze their work first.\n"
                 "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"MisconceptionDetector\", "
                 "\"task\": \"PROBLEM: Calculate momentum of 5kg object at 10 m/s ||| "
                 "STUDENT_WORK: I calculated 50kg*m/s ||| TOPIC: physics\"}}\n\n"
-                
-                "Tool Observation: Student has correct answer with proper units (50 kg·m/s)\n\n"
-                
+
+                "Tool Observation: Student has correct answer with proper units (50 kg*m/s)\n\n"
+
                 "Thought: Student is correct! I'll generate an appropriate response.\n"
                 "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"HintGenerator\", "
                 "\"task\": \"MODE: HINT ||| PROBLEM: Calculate momentum ||| STUDENT_WORK: 50kg*m/s ||| "
                 "MISCONCEPTION: None - correct answer ||| SEVERITY: none ||| TOPIC: physics\"}}\n\n"
-                
-                "Tool Observation: Excellent work! You correctly calculated 50 kg·m/s.\n\n"
-                
+
+                "Tool Observation: Excellent work! You correctly calculated 50 kg*m/s.\n\n"
+
                 "Thought: Need to validate with SafetyGuard, including history showing student already gave answer.\n"
                 "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"SafetyGuard\", "
-                "\"task\": \"PROBLEM: Calculate momentum ||| CORRECT_ANSWER: 50 kg·m/s ||| "
+                "\"task\": \"PROBLEM: Calculate momentum ||| CORRECT_ANSWER: 50 kg*m/s ||| "
                 "STUDENT_HISTORY: ['I calculated 50kg*m/s'] ||| "
-                "PROPOSED_RESPONSE: Excellent work! You correctly calculated 50 kg·m/s.\"}}\n\n"
-                
+                "PROPOSED_RESPONSE: Excellent work! You correctly calculated 50 kg*m/s.\"}}\n\n"
+
                 "Tool Observation: SAFE - Student already provided this answer\n\n"
-                
+
                 "Thought: Validated. Can provide final response.\n"
                 "Action: {\"tool_name\": \"final_answer\", \"tool_input\": \"Excellent work! You correctly calculated "
-                "50 kg·m/s. You applied p = mv perfectly and included the proper units!\"}"
+                "50 kg*m/s. You applied p = mv perfectly and included the proper units!\"}"
             ),
-            
+
             Example(
                 "User Request: 'What is momentum?'\n\n"
-                
-                "Thought: This is MODE 2 (QUESTION ANSWERING) - student asking conceptual question. "
+
+                "Thought: This is MODE: CONCEPT_EXPLANATION - student asking conceptual question. "
                 "Route to HintGenerator for concept explanation.\n"
                 "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"HintGenerator\", "
                 "\"task\": \"MODE: CONCEPT_EXPLANATION ||| CONCEPT: momentum ||| "
                 "QUESTION: What is momentum? ||| TOPIC: physics\"}}\n\n"
-                
+
                 "Tool Observation: Momentum is a measure of an object's motion, calculated as mass times velocity (p = mv).\n\n"
-                
+
                 "Thought: Validate the concept explanation.\n"
                 "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"SafetyGuard\", "
                 "\"task\": \"PROBLEM: Explain momentum ||| CORRECT_ANSWER: N/A ||| "
                 "STUDENT_HISTORY: [] ||| PROPOSED_RESPONSE: Momentum is a measure of an object's motion, "
                 "calculated as mass times velocity (p = mv).\"}}\n\n"
-                
+
                 "Tool Observation: SAFE - Conceptual explanation\n\n"
-                
+
                 "Thought: Validated. Provide final answer.\n"
                 "Action: {\"tool_name\": \"final_answer\", \"tool_input\": \"Momentum is a measure of an object's "
                 "motion, calculated as mass times velocity (p = mv). Think of it as how hard it would be to stop "
                 "a moving object.\"}"
+            ),
+
+            Example(
+                "User Request: Student says: 'I got x = 7 for the equation 2x + 3 = 15'\n\n"
+
+                "Thought: This is MODE: HINT - student is submitting their work for a math problem. "
+                "I need to check their answer.\n"
+                "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"MisconceptionDetector\", "
+                "\"task\": \"PROBLEM: Solve 2x + 3 = 15 ||| "
+                "STUDENT_WORK: I got x = 7 ||| TOPIC: algebra\"}}\n\n"
+
+                "Tool Observation: ANALYSIS COMPLETE - Severity: Minor. "
+                "Student subtracted 3 correctly but divided by 2 incorrectly (15-3=12, 12/2=6 not 7).\n\n"
+
+                "Thought: Minor arithmetic error. Generate a hint.\n"
+                "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"HintGenerator\", "
+                "\"task\": \"MODE: HINT ||| PROBLEM: Solve 2x + 3 = 15 ||| STUDENT_WORK: x = 7 ||| "
+                "MISCONCEPTION: Division error in final step ||| SEVERITY: Minor ||| TOPIC: algebra\"}}\n\n"
+
+                "Tool Observation: You correctly subtracted 3 from both sides. Now double-check: what is 12 divided by 2?\n\n"
+
+                "Thought: Validate hint with SafetyGuard.\n"
+                "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"SafetyGuard\", "
+                "\"task\": \"PROBLEM: Solve 2x + 3 = 15 ||| CORRECT_ANSWER: x = 6 ||| "
+                "STUDENT_HISTORY: ['I got x = 7'] ||| "
+                "PROPOSED_RESPONSE: You correctly subtracted 3 from both sides. Now double-check: what is 12 divided by 2?\"}}\n\n"
+
+                "Tool Observation: SAFE - Guides without revealing answer\n\n"
+
+                "Thought: Validated. Provide final response.\n"
+                "Action: {\"tool_name\": \"final_answer\", \"tool_input\": \"Good start! You correctly subtracted 3 "
+                "from both sides to get 12. Now double-check: what is 12 divided by 2?\"}"
             )
         ])
         

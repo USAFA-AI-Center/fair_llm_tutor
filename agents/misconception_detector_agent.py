@@ -121,6 +121,5 @@ class MisconceptionDetectorAgent(SimpleAgent):
         ])
         
         # TODO:: Integrate Chads prompting changes, track a turn through this system and capture as an example!
-        builder.examples.append(Example(""))
         
         return builder
