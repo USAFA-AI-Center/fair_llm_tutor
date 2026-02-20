@@ -102,6 +102,14 @@ class AnswerRevelationAnalyzerTool(AbstractTool):
                 elif part_clean.upper().startswith("PROPOSED_RESPONSE:"):
                     proposed_response = part_clean.split(":", 1)[1].strip()
 
+            # Validate required fields
+            if not proposed_response:
+                return (
+                    "ERROR: Missing required fields: PROPOSED_RESPONSE. "
+                    "Expected format: 'PROBLEM: [text] ||| CORRECT_ANSWER: [text] ||| "
+                    "STUDENT_HISTORY: [list] ||| PROPOSED_RESPONSE: [text]'"
+                )
+
             student_answers = self._extract_student_answers_from_history(student_history)
             student_already_answered = False
 

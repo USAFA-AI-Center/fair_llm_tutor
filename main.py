@@ -226,6 +226,18 @@ class TutorSession:
             f"and provide an appropriate hint or concept explanation. Remember: NEVER reveal the answer!"
         )
 
+        # Prepend preprocessor mode hint if detected
+        detected_mode = TutorManagerAgent.detect_mode(student_work)
+        if detected_mode:
+            prefix = f"PREPROCESSOR DETECTED MODE: {detected_mode}"
+            if (detected_mode == "CONCEPT_EXPLANATION"
+                    and TutorManagerAgent.has_answer_content(student_work)):
+                prefix += (
+                    "\nPREPROCESSOR WARNING: Answer-like content detected. "
+                    "SafetyGuard REQUIRED."
+                )
+            request = f"{prefix}\n\n{request}"
+
         logger.info("Processing student work through multi-agent system...")
 
         response = await self.runner.arun(request)

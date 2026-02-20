@@ -90,6 +90,20 @@ class StudentWorkAnalyzerTool(AbstractTool):
                 elif part.upper().startswith("TOPIC:"):
                     topic = part.split(":", 1)[1].strip()
 
+            # Validate required fields
+            missing = []
+            if not problem:
+                missing.append("PROBLEM")
+            if not student_work:
+                missing.append("STUDENT_WORK")
+            if not topic:
+                missing.append("TOPIC")
+            if missing:
+                return (
+                    f"ERROR: Missing required fields: {', '.join(missing)}. "
+                    "Expected format: 'PROBLEM: [text] ||| STUDENT_WORK: [text] ||| TOPIC: [text]'"
+                )
+
             units_analysis = ""
 
             units_found = self._extract_units_from_work(student_work)

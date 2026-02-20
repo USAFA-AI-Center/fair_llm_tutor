@@ -1,9 +1,11 @@
 # manager_agent.py
 
+import re
+
 from fairlib.modules.agent.simple_agent import SimpleAgent
 from fairlib.modules.agent.multi_agent_runner import ManagerPlanner
 from fairlib.core.interfaces.llm import AbstractChatModel
-from fairlib.core.interfaces.memory import AbstractMemory 
+from fairlib.core.interfaces.memory import AbstractMemory
 
 from fairlib.core.prompts import (
     PromptBuilder,
@@ -50,6 +52,79 @@ class TutorManagerAgent(SimpleAgent):
         return agent
     
     @staticmethod
+    def detect_mode(user_input: str) -> str | None:
+        """Lightweight heuristic to detect HINT vs CONCEPT_EXPLANATION mode.
+
+        Returns "HINT", "CONCEPT_EXPLANATION", or None if ambiguous/empty.
+        """
+        if not user_input or not user_input.strip():
+            return None
+
+        text = user_input.strip().lower()
+
+        # CONCEPT indicators
+        concept_score = 0
+        if text.endswith("?"):
+            concept_score += 1
+        concept_patterns = [r"\bwhat is\b", r"\bhow do\b", r"\bexplain\b",
+                           r"\bhelp me\b", r"\bcan you\b", r"\bwhy\b"]
+        for pat in concept_patterns:
+            if re.search(pat, text):
+                concept_score += 1
+
+        # HINT indicators
+        hint_score = 0
+        hint_patterns = [r"\bmy answer is\b", r"\bi got\b", r"\bi calculated\b"]
+        for pat in hint_patterns:
+            if re.search(pat, text):
+                hint_score += 1
+        # Cancel "i got" false positives — help-seeking phrases
+        if re.search(r"\bi got\b", text) and re.search(
+            r"\bi got\s+(?:confused|stuck|no idea|lost|a question)\b", text
+        ):
+            hint_score -= 1
+            concept_score += 1
+        # Numbers with units (e.g., 50kg, 10 m/s)
+        if re.search(r"\d+\s*[a-zA-Z]+(?:/[a-zA-Z]+)?", text):
+            hint_score += 1
+        # = followed by number (e.g., = 50, x = 7)
+        if re.search(r"=\s*-?\d+", text):
+            hint_score += 1
+        # Arithmetic expressions (e.g., 5 * 10, 2x + 3)
+        if re.search(r"\d+\s*[+\-*/]\s*\d+", text):
+            hint_score += 1
+
+        if hint_score > concept_score:
+            return "HINT"
+        elif concept_score > hint_score:
+            return "CONCEPT_EXPLANATION"
+        # Tie with both > 0: default to HINT (safer — HINT always runs SafetyGuard)
+        elif hint_score > 0:
+            return "HINT"
+        return None
+
+    @staticmethod
+    def has_answer_content(text: str) -> bool:
+        """Check if text contains answer-like content that SafetyGuard should validate.
+
+        Returns True if the text has numbers combined with answer-indicating
+        context (equations, units, 'the answer is', etc.).
+        """
+        if not text:
+            return False
+        t = text.lower()
+        if not re.search(r'\d', t):
+            return False
+        answer_indicators = [
+            r'\bthe answer\b',
+            r'\bmy answer\b',
+            r'\banswer is\b',
+            r'=\s*-?\d+',
+            r'\d+\s*[a-zA-Z]+(?:/[a-zA-Z]+)?',
+        ]
+        return any(re.search(pat, t) for pat in answer_indicators)
+
+    @staticmethod
     def _create_manager_prompt() -> PromptBuilder:
         builder = PromptBuilder()
         
@@ -61,6 +136,10 @@ class TutorManagerAgent(SimpleAgent):
             "- HintGenerator: Creates hints AND provides concept explanations\n"
             "- SafetyGuard: Validates responses\n\n"
                 
+            "PREPROCESSOR:\n"
+            "If the input starts with 'PREPROCESSOR DETECTED MODE:', use that as strong guidance "
+            "for mode selection. You may still override if context clearly contradicts it.\n\n"
+
             "MODE DETECTION:\n"
             "First, determine the interaction mode.\n"
             "You are SOLELY RESPONSIBLE for determining the mode.\n"
@@ -90,10 +169,18 @@ class TutorManagerAgent(SimpleAgent):
             "HintGenerator handles BOTH hints AND concept explanations\n"
             "Route concept questions directly to HintGenerator with MODE flag\n\n"
                 
+            "HINT ESCALATION:\n"
+            "If student already received a hint for the same problem and is still confused,\n"
+            "escalate by adding HINT_LEVEL: [previous level + 1] to HintGenerator delegation.\n"
+            "Hint levels: 1 (general) to 4 (most specific).\n\n"
+
             "WORKFLOW:\n"
             "1. Detect mode from student input\n"
             "2. Route appropriately based on mode\n"
-            "3. ALWAYS validate with SafetyGuard (include history)\n"
+            "3. ALWAYS validate with SafetyGuard for HINT mode (include history). "
+            "SafetyGuard is OPTIONAL for CONCEPT_EXPLANATION ONLY when the preprocessor "
+            "does NOT warn about answer content. If PREPROCESSOR WARNING mentions answer content, "
+            "ALWAYS use SafetyGuard even for concept questions.\n"
             "4. Provide final response\n"
         )
 
@@ -125,85 +212,30 @@ class TutorManagerAgent(SimpleAgent):
         
         builder.format_instructions.extend([
             FormatInstruction(
-                "# === IMPROVED DELEGATION TEMPLATES ===\n\n"
-                
-                "To MisconceptionDetector (work validation):\n"
-                "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"MisconceptionDetector\", "
-                "\"task\": \"PROBLEM: [full problem text] ||| STUDENT_WORK: [their work] ||| TOPIC: [subject]\"}}\n\n"
-                
-                "To HintGenerator (for hint generation mode):\n"
-                "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"HintGenerator\", "
-                "\"task\": \"MODE: HINT ||| PROBLEM: [full problem] ||| STUDENT_WORK: [their work] ||| "
-                "MISCONCEPTION: [from detector] ||| SEVERITY: [level] ||| TOPIC: [subject]\"}}\n\n"
-                
-                "To HintGenerator (for concept explanation mode):\n"
-                "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"HintGenerator\", "
-                "\"task\": \"MODE: CONCEPT_EXPLANATION ||| CONCEPT: [what to explain] ||| "
-                "QUESTION: [student's question] ||| TOPIC: [subject]\"}}\n\n"
-                
-                "To SafetyGuard (with history):\n"
-                "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"SafetyGuard\", "
-                "\"task\": \"PROBLEM: [full problem] ||| CORRECT_ANSWER: [if known] ||| "
-                "STUDENT_HISTORY: [list of previous student submissions] ||| "
-                "PROPOSED_RESPONSE: [hint or explanation to validate]\"}}\n\n"
-                
-                "For final answer:\n"
-                "Action: {\"tool_name\": \"final_answer\", \"tool_input\": \"Your synthesized response to the student\"}"
+                "# === DELEGATION TEMPLATES ===\n"
+                "MisconceptionDetector: PROBLEM: ... ||| STUDENT_WORK: ... ||| TOPIC: ...\n"
+                "HintGenerator (hint): MODE: HINT ||| PROBLEM: ... ||| STUDENT_WORK: ... ||| "
+                "MISCONCEPTION: ... ||| SEVERITY: ... ||| TOPIC: ... ||| HINT_LEVEL: [optional 1-4]\n"
+                "HintGenerator (concept): MODE: CONCEPT_EXPLANATION ||| CONCEPT: ... ||| QUESTION: ... ||| TOPIC: ...\n"
+                "SafetyGuard: PROBLEM: ... ||| CORRECT_ANSWER: ... ||| STUDENT_HISTORY: [...] ||| PROPOSED_RESPONSE: ...\n"
+                "final_answer: Your synthesized response to the student"
             )
         ])
 
         builder.examples.extend([
             Example(
-                "User Request: Student says: 'I calculated 50kg*m/s'\n\n"
-
-                "Thought: This is MODE: HINT - student is showing their calculated answer with units. "
-                "I need to analyze their work first.\n"
-                "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"MisconceptionDetector\", "
-                "\"task\": \"PROBLEM: Calculate momentum of 5kg object at 10 m/s ||| "
-                "STUDENT_WORK: I calculated 50kg*m/s ||| TOPIC: physics\"}}\n\n"
-
-                "Tool Observation: Student has correct answer with proper units (50 kg*m/s)\n\n"
-
-                "Thought: Student is correct! I'll generate an appropriate response.\n"
-                "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"HintGenerator\", "
-                "\"task\": \"MODE: HINT ||| PROBLEM: Calculate momentum ||| STUDENT_WORK: 50kg*m/s ||| "
-                "MISCONCEPTION: None - correct answer ||| SEVERITY: none ||| TOPIC: physics\"}}\n\n"
-
-                "Tool Observation: Excellent work! You correctly calculated 50 kg*m/s.\n\n"
-
-                "Thought: Need to validate with SafetyGuard, including history showing student already gave answer.\n"
-                "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"SafetyGuard\", "
-                "\"task\": \"PROBLEM: Calculate momentum ||| CORRECT_ANSWER: 50 kg*m/s ||| "
-                "STUDENT_HISTORY: ['I calculated 50kg*m/s'] ||| "
-                "PROPOSED_RESPONSE: Excellent work! You correctly calculated 50 kg*m/s.\"}}\n\n"
-
-                "Tool Observation: SAFE - Student already provided this answer\n\n"
-
-                "Thought: Validated. Can provide final response.\n"
-                "Action: {\"tool_name\": \"final_answer\", \"tool_input\": \"Excellent work! You correctly calculated "
-                "50 kg*m/s. You applied p = mv perfectly and included the proper units!\"}"
-            ),
-
-            Example(
                 "User Request: 'What is momentum?'\n\n"
 
                 "Thought: This is MODE: CONCEPT_EXPLANATION - student asking conceptual question. "
-                "Route to HintGenerator for concept explanation.\n"
+                "Route to HintGenerator for concept explanation. No specific answer involved, "
+                "so SafetyGuard is not needed.\n"
                 "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"HintGenerator\", "
                 "\"task\": \"MODE: CONCEPT_EXPLANATION ||| CONCEPT: momentum ||| "
                 "QUESTION: What is momentum? ||| TOPIC: physics\"}}\n\n"
 
                 "Tool Observation: Momentum is a measure of an object's motion, calculated as mass times velocity (p = mv).\n\n"
 
-                "Thought: Validate the concept explanation.\n"
-                "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"SafetyGuard\", "
-                "\"task\": \"PROBLEM: Explain momentum ||| CORRECT_ANSWER: N/A ||| "
-                "STUDENT_HISTORY: [] ||| PROPOSED_RESPONSE: Momentum is a measure of an object's motion, "
-                "calculated as mass times velocity (p = mv).\"}}\n\n"
-
-                "Tool Observation: SAFE - Conceptual explanation\n\n"
-
-                "Thought: Validated. Provide final answer.\n"
+                "Thought: This is a concept explanation with no specific answer to reveal. Provide final answer directly.\n"
                 "Action: {\"tool_name\": \"final_answer\", \"tool_input\": \"Momentum is a measure of an object's "
                 "motion, calculated as mass times velocity (p = mv). Think of it as how hard it would be to stop "
                 "a moving object.\"}"

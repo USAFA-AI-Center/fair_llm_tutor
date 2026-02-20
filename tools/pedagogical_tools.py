@@ -40,7 +40,8 @@ class SocraticHintGeneratorTool(AbstractTool):
         topic = ""
         concept = ""
         question = ""
-        
+        hint_level_override = None
+
         for part in parts:
             part = part.strip()
             if part.upper().startswith("MODE:"):
@@ -63,12 +64,34 @@ class SocraticHintGeneratorTool(AbstractTool):
                 concept = part.split(":", 1)[1].strip()
             elif part.upper().startswith("QUESTION:"):
                 question = part.split(":", 1)[1].strip()
+            elif part.upper().startswith("HINT_LEVEL:"):
+                try:
+                    hint_level_override = int(part.split(":", 1)[1].strip())
+                except (ValueError, IndexError):
+                    hint_level_override = None
+
+        # Mode-aware validation
+        if mode == "CONCEPT_EXPLANATION":
+            if not concept:
+                return (
+                    "ERROR: Missing required fields: CONCEPT. "
+                    "Expected format: 'MODE: CONCEPT_EXPLANATION ||| CONCEPT: [text] ||| "
+                    "QUESTION: [text] ||| TOPIC: [text]'"
+                )
+        else:  # HINT mode
+            if not problem:
+                return (
+                    "ERROR: Missing required fields: PROBLEM. "
+                    "Expected format: 'MODE: HINT ||| PROBLEM: [text] ||| STUDENT_WORK: [text] ||| "
+                    "MISCONCEPTION: [text] ||| SEVERITY: [level] ||| TOPIC: [text]'"
+                )
 
         if mode == "CONCEPT_EXPLANATION":
             return self._generate_concept_explanation(concept, question, topic)
         else:
             return self._generate_socratic_hint(
-                problem, student_work, misconception, severity, topic
+                problem, student_work, misconception, severity, topic,
+                hint_level_override=hint_level_override
             )
         
     def _generate_concept_explanation(self, concept: str, question: str, topic: str) -> str:
@@ -125,12 +148,13 @@ Focus on conceptual understanding.
         )
     
     def _generate_socratic_hint(
-        self, 
-        problem: str, 
-        student_work: str, 
-        misconception: str, 
-        severity: str, 
-        topic: str
+        self,
+        problem: str,
+        student_work: str,
+        misconception: str,
+        severity: str,
+        topic: str,
+        hint_level_override: int = None
     ) -> str:
         """
         Generate Socratic hints for student work.
@@ -138,7 +162,7 @@ Focus on conceptual understanding.
 
         if "none" in misconception.lower() or "correct" in misconception.lower():
             return self._generate_success_response(problem, student_work, topic)
-        
+
         # Determine hint level from severity
         severity_upper = severity.upper()
         if severity_upper == "CRITICAL":
@@ -149,6 +173,10 @@ Focus on conceptual understanding.
             hint_level = 3
         else:
             hint_level = 2
+
+        # Apply hint level override if provided (clamped to 1-4)
+        if hint_level_override is not None:
+            hint_level = max(1, min(4, hint_level_override))
         
         # Query course materials for context
         relevant_docs = ""
