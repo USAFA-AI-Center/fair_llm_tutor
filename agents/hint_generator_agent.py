@@ -14,27 +14,27 @@ from tools.pedagogical_tools import SocraticHintGeneratorTool
 class HintGeneratorAgent(SimpleAgent):
     """
     Generates Socratic hints using LLM + RAG + student work context.
-    
+
     Dual-mode operation:
     1. HINT mode: Generate hints for student work with misconceptions
     2. CONCEPT_EXPLANATION mode: Explain concepts when students ask questions
     """
-    
+
     @classmethod
     def create(cls, llm: AbstractChatModel, memory: AbstractMemory,
-               retriever: AbstractRetriever) -> "HintGeneratorAgent":        
+               retriever: AbstractRetriever) -> "HintGeneratorAgent":
         tool_registry = ToolRegistry()
 
         tool_registry.register_tool(SocraticHintGeneratorTool(llm, retriever))
-        
+
         planner = ReActPlanner(
-            llm, 
+            llm,
             tool_registry,
             prompt_builder=cls._create_hint_prompt()
         )
-        
+
         executor = ToolExecutor(tool_registry)
-        
+
         agent = cls(
             llm=llm,
             planner=planner,
@@ -43,39 +43,38 @@ class HintGeneratorAgent(SimpleAgent):
             max_steps=10,
             stateless=True
         )
-        
+
         agent.role_description = (
-            "You generate Socratic hints AND concept explanations based on the MODE specified."
+            "You generate Socratic hints AND concept explanations based on the mode specified."
         )
-        
+
         return agent
 
-    #TODO:: getting error: 'Invalid \escape: line 1 column 76 (char 75)': add prompting for this
     @staticmethod
     def _create_hint_prompt():
         from fairlib.core.prompts import (
             PromptBuilder, RoleDefinition, FormatInstruction, Example
         )
-        
+
         builder = PromptBuilder()
-        
+
         builder.role_definition = RoleDefinition(
             "You are a Hint Generator Agent with DUAL capabilities.\n\n"
-            
+
             "YOUR TWO MODES:\n"
             "1. HINT MODE - Generate Socratic hints for student work\n"
             "2. CONCEPT_EXPLANATION MODE - Explain concepts when students ask questions\n\n"
-            
+
             "HOW TO DETERMINE MODE:\n"
-            "Look for 'MODE:' in your input:\n"
-            "- If MODE: HINT -> Generate a hint based on student work and misconception\n"
-            "- If MODE: CONCEPT_EXPLANATION -> Explain the concept clearly\n\n"
-            
+            'Look for the "mode" field in your JSON input:\n'
+            '- If mode is "HINT" -> Generate a hint based on student work and misconception\n'
+            '- If mode is "CONCEPT_EXPLANATION" -> Explain the concept clearly\n\n'
+
             "YOUR WORKFLOW:\n"
-            "1. Check the MODE in your input\n"
-            "2. Call socratic_hint_generator with ALL the context\n"
+            "1. Check the mode in your input\n"
+            "2. Call socratic_hint_generator with the full JSON input\n"
             "3. Immediately use final_answer to return the result\n\n"
-            
+
             "CRITICAL CONSTRAINTS:\n"
             "- NEVER provide final answers in hints\n"
             "- For concepts, explain clearly but don't solve specific problems\n"
@@ -104,68 +103,77 @@ class HintGeneratorAgent(SimpleAgent):
                 "use final_answer to return it to the Manager."
             )
         ])
-        
+
         builder.format_instructions.append(
             FormatInstruction(
-                "# --- TOOL INPUT FORMATS ---\n\n"
+                "# --- TOOL INPUT FORMATS (JSON) ---\n\n"
                 "FOR HINT MODE:\n"
-                "'MODE: HINT ||| PROBLEM: [full problem text] ||| STUDENT_WORK: [their actual work] ||| "
-                "MISCONCEPTION: [description] ||| SEVERITY: [Critical/Major/Minor] ||| TOPIC: [subject]'\n\n"
-                
+                '{"mode": "HINT", "problem": "full problem text", "student_work": "their actual work", '
+                '"misconception": "description", "severity": "Critical/Major/Minor", "topic": "subject"}\n\n'
+
                 "FOR CONCEPT EXPLANATION MODE:\n"
-                "'MODE: CONCEPT_EXPLANATION ||| CONCEPT: [what to explain] ||| "
-                "QUESTION: [student's question] ||| TOPIC: [subject]'"
+                '{"mode": "CONCEPT_EXPLANATION", "concept": "what to explain", '
+                '"question": "student question", "topic": "subject"}'
             )
         )
-        
+
         builder.examples.extend([
             Example(
-                "User Request: Generate hint for student who calculated momentum without units.\n"
-                "Task Details: MODE: HINT ||| PROBLEM: Calculate the momentum of a 5 kg object moving at 10 m/s. ||| "
-                "STUDENT_WORK: p = 5 * 10 = 50 ||| MISCONCEPTION: Missing units ||| SEVERITY: Minor ||| TOPIC: physics\n\n"
-                
+                "User Request: Generate hint for student who got a history date wrong.\n"
+                'Task Details: {"mode": "HINT", "problem": "What year did WWII end?", '
+                '"student_work": "I think it ended in 1944", '
+                '"misconception": "Off by one year", "severity": "Minor", "topic": "history"}\n\n'
+
                 '{\n'
-                '  "thought": "This is HINT mode. I need to generate a Socratic hint for missing units.",\n'
+                '  "thought": "This is HINT mode. I need to generate a Socratic hint for a history date error.",\n'
                 '  "action": {\n'
                 '    "tool_name": "socratic_hint_generator",\n'
-                '    "tool_input": "MODE: HINT ||| PROBLEM: Calculate the momentum of a 5 kg object moving at 10 m/s. ||| STUDENT_WORK: p = 5 * 10 = 50 ||| MISCONCEPTION: Missing units ||| SEVERITY: Minor ||| TOPIC: physics"\n'
+                '    "tool_input": "{\\"mode\\": \\"HINT\\", \\"problem\\": \\"What year did WWII end?\\", '
+                '\\"student_work\\": \\"I think it ended in 1944\\", '
+                '\\"misconception\\": \\"Off by one year\\", \\"severity\\": \\"Minor\\", \\"topic\\": \\"history\\"}"\n'
                 '  }\n'
                 '}\n\n'
-                
-                "Observation: Excellent calculation! You've correctly applied p = mv. Now think: what units result from kg times m/s?\n\n"
-                
+
+                "Observation: COMPLETE HINT (Level 3): You're close! Think about the key events that marked the end. "
+                "When did Germany surrender, and what happened in the Pacific?\n\n"
+
                 '{\n'
                 '  "thought": "The hint has been generated. I will return it using final_answer.",\n'
                 '  "action": {\n'
                 '    "tool_name": "final_answer",\n'
-                '    "tool_input": "Excellent calculation! You\'ve correctly applied p = mv. Now think: what units result from kg times m/s?"\n'
+                '    "tool_input": "You\'re close! Think about the key events that marked the end of the war. '
+                'When did Germany surrender, and what happened in the Pacific?"\n'
                 '  }\n'
                 '}'
             ),
-            
+
             Example(
-                "User Request: Explain momentum to student.\n"
-                "Task Details: MODE: CONCEPT_EXPLANATION ||| CONCEPT: momentum ||| "
-                "QUESTION: What is momentum? ||| TOPIC: physics\n\n"
-                
+                "User Request: Explain a concept to student.\n"
+                'Task Details: {"mode": "CONCEPT_EXPLANATION", "concept": "balancing chemical equations", '
+                '"question": "How do I balance equations?", "topic": "chemistry"}\n\n'
+
                 '{\n'
-                '  "thought": "This is CONCEPT_EXPLANATION mode. I need to explain the concept of momentum.",\n'
+                '  "thought": "This is CONCEPT_EXPLANATION mode. I need to explain balancing equations.",\n'
                 '  "action": {\n'
                 '    "tool_name": "socratic_hint_generator",\n'
-                '    "tool_input": "MODE: CONCEPT_EXPLANATION ||| CONCEPT: momentum ||| QUESTION: What is momentum? ||| TOPIC: physics"\n'
+                '    "tool_input": "{\\"mode\\": \\"CONCEPT_EXPLANATION\\", '
+                '\\"concept\\": \\"balancing chemical equations\\", '
+                '\\"question\\": \\"How do I balance equations?\\", \\"topic\\": \\"chemistry\\"}"\n'
                 '  }\n'
                 '}\n\n'
-                
-                "Observation: Momentum is a measure of an object's motion, calculated as mass times velocity (p = mv). It tells us how difficult it is to stop a moving object.\n\n"
-                
+
+                "Observation: CONCEPT EXPLANATION: Balancing means ensuring equal atoms on both sides. "
+                "Start by counting atoms, then adjust coefficients.\n\n"
+
                 '{\n'
                 '  "thought": "The concept explanation is ready. I will return it.",\n'
                 '  "action": {\n'
                 '    "tool_name": "final_answer",\n'
-                '    "tool_input": "Momentum is a measure of an object\'s motion, calculated as mass times velocity (p = mv). It tells us how difficult it is to stop a moving object."\n'
+                '    "tool_input": "Balancing chemical equations means ensuring you have the same number of each atom on both sides. '
+                'Start by counting atoms, then adjust coefficients."\n'
                 '  }\n'
                 '}'
             )
         ])
-        
+
         return builder

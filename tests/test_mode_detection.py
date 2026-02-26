@@ -54,6 +54,54 @@ class TestConceptDetection:
         assert TutorManagerAgent.detect_mode("Is this right?") == "CONCEPT_EXPLANATION"
 
 
+class TestNonSTEMHintDetection:
+    """detect_mode returns HINT for non-STEM work submissions."""
+
+    def test_essay_submission(self):
+        assert TutorManagerAgent.detect_mode(
+            "Here is my essay on the causes of WWI"
+        ) == "HINT"
+
+    def test_code_submission_with_output(self):
+        assert TutorManagerAgent.detect_mode(
+            "My function returns [1, 2, 3] but expected [3, 2, 1]"
+        ) == "HINT"
+
+    def test_history_answer(self):
+        assert TutorManagerAgent.detect_mode(
+            "I think it ended in 1944"
+        ) == "HINT"
+
+    def test_code_with_equals(self):
+        assert TutorManagerAgent.detect_mode(
+            "I got result = 42 from my program"
+        ) == "HINT"
+
+
+class TestNonSTEMConceptDetection:
+    """detect_mode returns CONCEPT_EXPLANATION for non-STEM questions."""
+
+    def test_literature_question(self):
+        assert TutorManagerAgent.detect_mode(
+            "What is the theme of To Kill a Mockingbird?"
+        ) == "CONCEPT_EXPLANATION"
+
+    def test_history_question(self):
+        assert TutorManagerAgent.detect_mode(
+            "Why did the Roman Empire fall?"
+        ) == "CONCEPT_EXPLANATION"
+
+    def test_programming_concept(self):
+        assert TutorManagerAgent.detect_mode(
+            "How do I use recursion in Python?"
+        ) == "CONCEPT_EXPLANATION"
+
+    def test_philosophy_question(self):
+        assert TutorManagerAgent.detect_mode(
+            "Can you explain what utilitarianism means?"
+        ) == "CONCEPT_EXPLANATION"
+
+
 class TestAmbiguousAndEdgeCases:
     """detect_mode returns None for ambiguous or empty inputs."""
 

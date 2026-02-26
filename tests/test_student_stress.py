@@ -14,12 +14,52 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agents.manager_agent import TutorManagerAgent
-from tests.conftest import MockLLM, MockRetriever, build_tool_input
+from tests.conftest import MockLLM, MockRetriever, build_tool_input, build_json_input
+from tools.schemas import DiagnosticInput, HintInput, InteractionMode, Severity
 
 
 # ============================================================================
 # 1. Mode detection — misclassified student inputs
 # ============================================================================
+
+
+class TestNonSTEMModeDetection:
+    """Mode detection for non-STEM domains (literature, history, code)."""
+
+    def test_literature_essay_with_question(self):
+        """Student asks about their essay — concept question, not work submission."""
+        result = TutorManagerAgent.detect_mode(
+            "Can you explain what makes a good thesis statement?"
+        )
+        assert result == "CONCEPT_EXPLANATION"
+
+    def test_code_output_with_numbers(self):
+        """Student shares code output — numbers trigger HINT correctly."""
+        result = TutorManagerAgent.detect_mode(
+            "I got output = 15 but the expected output is 20"
+        )
+        assert result == "HINT"
+
+    def test_history_date_submission(self):
+        """Student submits a historical date — numbers trigger HINT."""
+        result = TutorManagerAgent.detect_mode(
+            "I think the French Revolution started in 1788"
+        )
+        assert result == "HINT"
+
+    def test_music_theory_question(self):
+        """Pure concept question about music theory."""
+        result = TutorManagerAgent.detect_mode(
+            "What is the difference between major and minor scales?"
+        )
+        assert result == "CONCEPT_EXPLANATION"
+
+    def test_programming_debug_submission(self):
+        """Student submitting debug output with values."""
+        result = TutorManagerAgent.detect_mode(
+            "My function returned [1, 2, 3] instead of [3, 2, 1]"
+        )
+        assert result == "HINT"
 
 
 class TestModeDetectionFalseHints:
@@ -193,7 +233,7 @@ class TestSafetyBypassRisks:
 
 
 class TestFieldParsingEdgeCases:
-    """Student content that could break the ||| delimiter parsing."""
+    """Edge cases in JSON input parsing for diagnostic tool."""
 
     def _make_diagnostic_tool(self):
         from tools.diagnostic_tools import StudentWorkAnalyzerTool
@@ -203,52 +243,55 @@ class TestFieldParsingEdgeCases:
         from tools.pedagogical_tools import SocraticHintGeneratorTool
         return SocraticHintGeneratorTool(llm=MockLLM("hint text"), retriever=MockRetriever())
 
-    def test_student_work_contains_triple_pipe(self):
-        """If the LLM embeds student work that itself contains '|||',
-        the parser will split in the wrong place."""
+    def test_student_work_with_special_chars_in_json(self):
+        """JSON correctly handles special characters that broke ||| parsing."""
         tool = self._make_diagnostic_tool()
-        # Simulating what happens if student typed "a ||| b" and the manager
-        # passes it through without escaping
-        result = tool.use(
-            "PROBLEM: Solve x ||| STUDENT_WORK: I tried a ||| b approach ||| TOPIC: algebra"
+        tool_input = build_json_input(
+            DiagnosticInput,
+            problem="Solve x",
+            student_work='I tried a ||| b approach',
+            topic="algebra"
         )
-        # The parser will see 4 parts instead of 3:
-        # "PROBLEM: Solve x", "STUDENT_WORK: I tried a", "b approach", "TOPIC: algebra"
-        # "b approach" won't match any field prefix, so it's silently dropped.
-        # STUDENT_WORK becomes "I tried a" (truncated)
-        # This still "works" but with corrupted student work.
-        assert "ERROR" not in result  # No validation error — silent corruption
-
-    def test_student_work_contains_field_prefix(self):
-        """Student writes something like 'TOPIC: I think the topic is wrong'.
-        If embedded in tool input, it could hijack field parsing."""
-        tool = self._make_diagnostic_tool()
-        result = tool.use(
-            "PROBLEM: Explain TOPIC: gravity ||| STUDENT_WORK: I think so ||| TOPIC: physics"
-        )
-        # "PROBLEM: Explain TOPIC: gravity" — split(":", 1) gives "Explain TOPIC: gravity"
-        # TOPIC field is parsed correctly from the last part.
-        # The problem text includes "TOPIC: gravity" which is noise but not a crash.
+        result = tool.use(tool_input)
+        # JSON preserves the full student work — no silent corruption
         assert "ERROR" not in result
 
-    def test_colon_in_student_answer(self):
-        """Student's work contains colons (e.g., ratios like '2:3')."""
+    def test_student_work_with_field_prefix_in_json(self):
+        """JSON handles student work containing 'TOPIC:' without hijacking."""
         tool = self._make_diagnostic_tool()
-        result = tool.use(
-            "PROBLEM: What is the ratio? ||| STUDENT_WORK: The ratio is 2:3 ||| TOPIC: math"
+        tool_input = build_json_input(
+            DiagnosticInput,
+            problem="Explain TOPIC: gravity",
+            student_work="I think so",
+            topic="physics"
         )
-        # split(":", 1) on "STUDENT_WORK: The ratio is 2:3" gives
-        # "The ratio is 2:3" — correctly preserved.
+        result = tool.use(tool_input)
         assert "ERROR" not in result
 
-    def test_empty_student_work_after_colon(self):
-        """LLM generates 'STUDENT_WORK: ' with nothing after the colon."""
+    def test_student_work_with_colons_in_json(self):
+        """JSON handles colons in student work (e.g., ratios '2:3')."""
         tool = self._make_diagnostic_tool()
-        result = tool.use(
-            "PROBLEM: Solve x ||| STUDENT_WORK: ||| TOPIC: algebra"
+        tool_input = build_json_input(
+            DiagnosticInput,
+            problem="What is the ratio?",
+            student_work="The ratio is 2:3",
+            topic="math"
         )
+        result = tool.use(tool_input)
+        assert "ERROR" not in result
+
+    def test_empty_student_work_in_json(self):
+        """Empty student_work field returns validation error."""
+        tool = self._make_diagnostic_tool()
+        tool_input = build_json_input(
+            DiagnosticInput,
+            problem="Solve x",
+            student_work="",
+            topic="algebra"
+        )
+        result = tool.use(tool_input)
         assert "ERROR" in result
-        assert "STUDENT_WORK" in result
+        assert "student_work" in result.lower()
 
 
 # ============================================================================
@@ -257,7 +300,7 @@ class TestFieldParsingEdgeCases:
 
 
 class TestHintEscalationEdgeCases:
-    """Edge cases in HINT_LEVEL parsing and application."""
+    """Edge cases in hint_level handling with JSON input."""
 
     def _make_tool(self):
         from tools.pedagogical_tools import SocraticHintGeneratorTool
@@ -265,58 +308,49 @@ class TestHintEscalationEdgeCases:
             llm=MockLLM("Socratic hint text"), retriever=MockRetriever()
         )
 
-    def test_hint_level_float(self):
-        """HINT_LEVEL: 2.5 — int() will raise ValueError, should fall back."""
-        tool = self._make_tool()
-        result = tool.use(build_tool_input(
-            MODE="HINT", PROBLEM="Solve 2x=10", STUDENT_WORK="x=3",
-            MISCONCEPTION="division error", SEVERITY="Critical", TOPIC="algebra",
-            HINT_LEVEL="2.5"
-        ))
-        # int("2.5") raises ValueError → hint_level_override = None → severity default
-        assert "Level 2" in result  # Critical → Level 2
-
     def test_hint_level_negative(self):
-        """HINT_LEVEL: -1 — should clamp to 1."""
+        """hint_level=-1 should clamp to 1."""
         tool = self._make_tool()
-        result = tool.use(build_tool_input(
-            MODE="HINT", PROBLEM="Solve 2x=10", STUDENT_WORK="x=3",
-            MISCONCEPTION="division error", SEVERITY="Minor", TOPIC="algebra",
-            HINT_LEVEL="-1"
+        result = tool.use(build_json_input(
+            HintInput,
+            mode=InteractionMode.HINT, problem="Solve 2x=10", student_work="x=3",
+            misconception="division error", severity=Severity.MINOR, topic="algebra",
+            hint_level=-1
         ))
         assert "Level 1" in result
 
-    def test_hint_level_with_spaces(self):
-        """HINT_LEVEL:  3  (extra whitespace)."""
-        tool = self._make_tool()
-        result = tool.use(build_tool_input(
-            MODE="HINT", PROBLEM="Solve 2x=10", STUDENT_WORK="x=3",
-            MISCONCEPTION="division error", SEVERITY="Minor", TOPIC="algebra",
-            HINT_LEVEL="  3  "
-        ))
-        # strip() then int() should handle this
-        assert "Level 3" in result
-
     def test_hint_level_ignored_in_concept_mode(self):
-        """HINT_LEVEL in CONCEPT_EXPLANATION mode — should be ignored entirely."""
+        """hint_level in CONCEPT_EXPLANATION mode should be ignored entirely."""
         tool = self._make_tool()
-        result = tool.use(build_tool_input(
-            MODE="CONCEPT_EXPLANATION", CONCEPT="momentum",
-            QUESTION="What is momentum?", TOPIC="physics",
-            HINT_LEVEL="4"
+        result = tool.use(build_json_input(
+            HintInput,
+            mode=InteractionMode.CONCEPT_EXPLANATION, concept="momentum",
+            question="What is momentum?", topic="physics",
+            hint_level=4
         ))
-        # Should generate a concept explanation, not a level-4 hint
         assert "CONCEPT EXPLANATION" in result
         assert "Level 4" not in result
 
-    def test_hint_level_empty_string(self):
-        """HINT_LEVEL: (empty) — int("") raises ValueError, should fall back."""
+    def test_hint_level_none_uses_severity_default(self):
+        """Without hint_level, severity determines level as before."""
         tool = self._make_tool()
-        result = tool.use(
-            "MODE: HINT ||| PROBLEM: Solve 2x=10 ||| STUDENT_WORK: x=3 ||| "
-            "MISCONCEPTION: error ||| SEVERITY: Major ||| TOPIC: algebra ||| HINT_LEVEL:"
-        )
+        result = tool.use(build_json_input(
+            HintInput,
+            mode=InteractionMode.HINT, problem="Solve 2x=10", student_work="x=3",
+            misconception="error", severity=Severity.MAJOR, topic="algebra"
+        ))
         assert "Level 2" in result  # Major → Level 2
+
+    def test_hint_level_large_value_clamped(self):
+        """hint_level=100 should clamp to Level 4."""
+        tool = self._make_tool()
+        result = tool.use(build_json_input(
+            HintInput,
+            mode=InteractionMode.HINT, problem="Solve 2x=10", student_work="x=3",
+            misconception="error", severity=Severity.MINOR, topic="algebra",
+            hint_level=100
+        ))
+        assert "Level 4" in result
 
 
 # ============================================================================

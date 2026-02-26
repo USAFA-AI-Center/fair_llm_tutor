@@ -24,18 +24,18 @@ class TutorManagerAgent(SimpleAgent):
         - Conversation history tracking for safety validation
         - Proper routing based on student intent
     """
-    
+
     @classmethod
-    def create(cls, llm: AbstractChatModel, memory: AbstractMemory, 
+    def create(cls, llm: AbstractChatModel, memory: AbstractMemory,
                workers: Dict) -> "TutorManagerAgent":
         """Create manager with improved prompt for context preservation"""
-        
+
         planner = ManagerPlanner(
             llm=llm,
             workers=workers,
             prompt_builder=cls._create_manager_prompt()
         )
-        
+
         agent = cls(
             llm=llm,
             planner=planner,
@@ -44,13 +44,13 @@ class TutorManagerAgent(SimpleAgent):
             max_steps=15,
             stateless=False
         )
-        
+
         agent.role_description = (
             "You are a Socratic tutor manager coordinating specialist agents."
         )
-        
+
         return agent
-    
+
     @staticmethod
     def detect_mode(user_input: str) -> str | None:
         """Lightweight heuristic to detect HINT vs CONCEPT_EXPLANATION mode.
@@ -93,6 +93,19 @@ class TutorManagerAgent(SimpleAgent):
         # Arithmetic expressions (e.g., 5 * 10, 2x + 3)
         if re.search(r"\d+\s*[+\-*/]\s*\d+", text):
             hint_score += 1
+        # Work submission phrases (non-STEM: essays, code, history)
+        work_submission_patterns = [
+            r"\bhere is my\b",       # "Here is my essay"
+            r"\bi think\b.*\d",      # "I think it ended in 1944"
+            r"\breturned\b.*\d",     # "My function returned [1, 2, 3]"
+            r"\boutput\b.*\d",       # "The output is 15"
+            r"\bexpected\b.*\d",     # "expected [3, 2, 1]"
+            r"\binstead of\b",       # "got X instead of Y"
+            r"\bmy (?:essay|code|function|program|solution)\b",  # "My code/essay..."
+        ]
+        for pat in work_submission_patterns:
+            if re.search(pat, text):
+                hint_score += 1
 
         if hint_score > concept_score:
             return "HINT"
@@ -127,15 +140,15 @@ class TutorManagerAgent(SimpleAgent):
     @staticmethod
     def _create_manager_prompt() -> PromptBuilder:
         builder = PromptBuilder()
-        
+
         builder.role_definition = RoleDefinition(
             "You are a Socratic Tutor Manager coordinating specialist agents.\n\n"
-            
+
             "YOUR TEAM:\n"
             "- MisconceptionDetector: Analyzes student work for errors\n"
             "- HintGenerator: Creates hints AND provides concept explanations\n"
             "- SafetyGuard: Validates responses\n\n"
-                
+
             "PREPROCESSOR:\n"
             "If the input starts with 'PREPROCESSOR DETECTED MODE:', use that as strong guidance "
             "for mode selection. You may still override if context clearly contradicts it.\n\n"
@@ -147,31 +160,31 @@ class TutorManagerAgent(SimpleAgent):
             "Analyze the user input. If the student is asking for guidance on how to approach the problem, delegate adhering to MODE: CONCEPT_EXPLANATION.\n"
             "If the student is asking if their answer is correct, showing work, or submitting calculations, delegate adhering to MODE: HINT.\n"
             "This step is CRUCIAL in getting this system to work. If they are asking for guidance, route to MODE: CONCEPT_EXPLANATION. If they are submitting work and needing verification, route to MODE: HINT.\n"
-            
+
             "\tMODE: HINT\n"
-            "\t\tIndicators: Student shows calculations, states 'my answer is', provides numerical values\n"
-            "\t\tExamples: 'I got 500', 'My answer is 50kg*m/s', 'p = 5 * 10 = 50'\n"
+            "\t\tIndicators: Student shows calculations, states 'my answer is', provides values\n"
+            "\t\tExamples: 'I got 500', 'My answer is x=6', 'I think it ended in 1944'\n"
             "\t\tAction: Analyze work -> Generate hint -> Validate safety\n"
-            "\t\tDELEGATION INPUT MUST CONTAIN: MODE: HINT\n\n"
-            
+            "\t\tDELEGATION INPUT MUST BE JSON\n\n"
+
             "\tMODE: CONCEPT_EXPLANATION\n"
             "\t\tIndicators: Questions words (what, how, why), ends with '?', 'explain', 'help'\n"
-            "\t\tExamples: 'What is momentum?', 'How do I calculate this?', 'Can you explain?'\n"
+            "\t\tExamples: 'What is momentum?', 'How do I balance equations?', 'Explain the theme'\n"
             "\t\tAction: HintGenerator provides concept explanation -> Validate safety\n"
-            "\t\tDELEGATION INPUT MUST CONTAIN: MODE: CONCEPT_EXPLANATION\n\n"
-            
+            "\t\tDELEGATION INPUT MUST BE JSON\n\n"
+
             "SAFETY WITH HISTORY:\n"
             "Track conversation history. If student has already stated an answer,\n"
             "SafetyGuard can allow confirmation of that answer.\n"
-            "Pass history to SafetyGuard: STUDENT_HISTORY: [previous student submissions]\n\n"
-            
+            "Pass history to SafetyGuard as a JSON list in student_history.\n\n"
+
             "CONCEPT IN HINTGENERATOR:\n"
             "HintGenerator handles BOTH hints AND concept explanations\n"
-            "Route concept questions directly to HintGenerator with MODE flag\n\n"
-                
+            "Route concept questions directly to HintGenerator with mode field\n\n"
+
             "HINT ESCALATION:\n"
             "If student already received a hint for the same problem and is still confused,\n"
-            "escalate by adding HINT_LEVEL: [previous level + 1] to HintGenerator delegation.\n"
+            "escalate by adding hint_level (previous level + 1) to HintGenerator delegation.\n"
             "Hint levels: 1 (general) to 4 (most specific).\n\n"
 
             "WORKFLOW:\n"
@@ -190,12 +203,12 @@ class TutorManagerAgent(SimpleAgent):
                 "You MUST respond with EXACTLY ONE 'Thought' and ONE 'Action' per turn.\n"
                 "Format:\n"
                 "Thought: [Your reasoning about what to do next]\n"
-                "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"WorkerName\", \"task\": \"detailed task\"}}\n\n"
-                
+                "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"WorkerName\", \"task\": \"detailed task as JSON string\"}}\n\n"
+
                 "OR for final answer:\n"
                 "Thought: [Your reasoning that you have everything needed]\n"
                 "Action: {\"tool_name\": \"final_answer\", \"tool_input\": \"Your complete response to the student\"}\n\n"
-                
+
                 "CRITICAL: The Action MUST be valid JSON."
             ),
             FormatInstruction(
@@ -204,74 +217,77 @@ class TutorManagerAgent(SimpleAgent):
                 "1. Look for work submission patterns (calculations, 'my answer', numbers with units)\n"
                 "2. Look for question patterns ('what', 'how', 'explain', '?')\n"
                 "3. Decide mode and route accordingly\n\n"
-                
-                "Include MODE in your delegations:\n"
-                "- Add 'MODE: HINT' or 'MODE: CONCEPT_EXPLANATION'"
+
+                "Include mode in your delegations via JSON fields."
             )
         ])
-        
+
         builder.format_instructions.extend([
             FormatInstruction(
-                "# === DELEGATION TEMPLATES ===\n"
-                "MisconceptionDetector: PROBLEM: ... ||| STUDENT_WORK: ... ||| TOPIC: ...\n"
-                "HintGenerator (hint): MODE: HINT ||| PROBLEM: ... ||| STUDENT_WORK: ... ||| "
-                "MISCONCEPTION: ... ||| SEVERITY: ... ||| TOPIC: ... ||| HINT_LEVEL: [optional 1-4]\n"
-                "HintGenerator (concept): MODE: CONCEPT_EXPLANATION ||| CONCEPT: ... ||| QUESTION: ... ||| TOPIC: ...\n"
-                "SafetyGuard: PROBLEM: ... ||| CORRECT_ANSWER: ... ||| STUDENT_HISTORY: [...] ||| PROPOSED_RESPONSE: ...\n"
+                "# === DELEGATION TEMPLATES (JSON) ===\n"
+                'MisconceptionDetector: {"problem": "...", "student_work": "...", "topic": "..."}\n'
+                'HintGenerator (hint): {"mode": "HINT", "problem": "...", "student_work": "...", '
+                '"misconception": "...", "severity": "Major", "topic": "...", "hint_level": 2}\n'
+                'HintGenerator (concept): {"mode": "CONCEPT_EXPLANATION", "concept": "...", "question": "...", "topic": "..."}\n'
+                'SafetyGuard: {"problem": "...", "correct_answer": "...", "student_history": ["..."], "proposed_response": "..."}\n'
                 "final_answer: Your synthesized response to the student"
             )
         ])
 
         builder.examples.extend([
             Example(
-                "User Request: 'What is momentum?'\n\n"
+                'User Request: "What is the theme of To Kill a Mockingbird?"\n\n'
 
-                "Thought: This is MODE: CONCEPT_EXPLANATION - student asking conceptual question. "
+                "Thought: This is MODE: CONCEPT_EXPLANATION - student asking a conceptual question about literature. "
                 "Route to HintGenerator for concept explanation. No specific answer involved, "
                 "so SafetyGuard is not needed.\n"
-                "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"HintGenerator\", "
-                "\"task\": \"MODE: CONCEPT_EXPLANATION ||| CONCEPT: momentum ||| "
-                "QUESTION: What is momentum? ||| TOPIC: physics\"}}\n\n"
+                'Action: {"tool_name": "delegate", "tool_input": {"worker_name": "HintGenerator", '
+                '"task": "{\\"mode\\": \\"CONCEPT_EXPLANATION\\", \\"concept\\": \\"themes in To Kill a Mockingbird\\", '
+                '\\"question\\": \\"What is the theme of To Kill a Mockingbird?\\", \\"topic\\": \\"literature\\"}"}}\n\n'
 
-                "Tool Observation: Momentum is a measure of an object's motion, calculated as mass times velocity (p = mv).\n\n"
+                "Tool Observation: CONCEPT EXPLANATION for 'themes in To Kill a Mockingbird': "
+                "The novel explores several themes including racial injustice, the loss of innocence, and moral courage.\n\n"
 
                 "Thought: This is a concept explanation with no specific answer to reveal. Provide final answer directly.\n"
-                "Action: {\"tool_name\": \"final_answer\", \"tool_input\": \"Momentum is a measure of an object's "
-                "motion, calculated as mass times velocity (p = mv). Think of it as how hard it would be to stop "
-                "a moving object.\"}"
+                'Action: {"tool_name": "final_answer", "tool_input": "To Kill a Mockingbird explores several important themes. '
+                "The most prominent is racial injustice, shown through the trial of Tom Robinson. "
+                "There's also the theme of moral courage and the loss of innocence. "
+                'Which of these themes stood out to you in your reading?"}'
             ),
 
             Example(
-                "User Request: Student says: 'I got x = 7 for the equation 2x + 3 = 15'\n\n"
+                'User Request: Student says: "I got x = 7 for the equation 2x + 3 = 15"\n\n'
 
                 "Thought: This is MODE: HINT - student is submitting their work for a math problem. "
                 "I need to check their answer.\n"
-                "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"MisconceptionDetector\", "
-                "\"task\": \"PROBLEM: Solve 2x + 3 = 15 ||| "
-                "STUDENT_WORK: I got x = 7 ||| TOPIC: algebra\"}}\n\n"
+                'Action: {"tool_name": "delegate", "tool_input": {"worker_name": "MisconceptionDetector", '
+                '"task": "{\\"problem\\": \\"Solve 2x + 3 = 15\\", '
+                '\\"student_work\\": \\"I got x = 7\\", \\"topic\\": \\"algebra\\"}"}}\n\n'
 
                 "Tool Observation: ANALYSIS COMPLETE - Severity: Minor. "
                 "Student subtracted 3 correctly but divided by 2 incorrectly (15-3=12, 12/2=6 not 7).\n\n"
 
                 "Thought: Minor arithmetic error. Generate a hint.\n"
-                "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"HintGenerator\", "
-                "\"task\": \"MODE: HINT ||| PROBLEM: Solve 2x + 3 = 15 ||| STUDENT_WORK: x = 7 ||| "
-                "MISCONCEPTION: Division error in final step ||| SEVERITY: Minor ||| TOPIC: algebra\"}}\n\n"
+                'Action: {"tool_name": "delegate", "tool_input": {"worker_name": "HintGenerator", '
+                '"task": "{\\"mode\\": \\"HINT\\", \\"problem\\": \\"Solve 2x + 3 = 15\\", '
+                '\\"student_work\\": \\"x = 7\\", \\"misconception\\": \\"Division error in final step\\", '
+                '\\"severity\\": \\"Minor\\", \\"topic\\": \\"algebra\\"}"}}\n\n'
 
-                "Tool Observation: You correctly subtracted 3 from both sides. Now double-check: what is 12 divided by 2?\n\n"
+                "Tool Observation: COMPLETE HINT (Level 3): You correctly subtracted 3 from both sides. "
+                "Now double-check: what is 12 divided by 2?\n\n"
 
                 "Thought: Validate hint with SafetyGuard.\n"
-                "Action: {\"tool_name\": \"delegate\", \"tool_input\": {\"worker_name\": \"SafetyGuard\", "
-                "\"task\": \"PROBLEM: Solve 2x + 3 = 15 ||| CORRECT_ANSWER: x = 6 ||| "
-                "STUDENT_HISTORY: ['I got x = 7'] ||| "
-                "PROPOSED_RESPONSE: You correctly subtracted 3 from both sides. Now double-check: what is 12 divided by 2?\"}}\n\n"
+                'Action: {"tool_name": "delegate", "tool_input": {"worker_name": "SafetyGuard", '
+                '"task": "{\\"problem\\": \\"Solve 2x + 3 = 15\\", \\"correct_answer\\": \\"x = 6\\", '
+                '\\"student_history\\": [\\"I got x = 7\\"], '
+                '\\"proposed_response\\": \\"You correctly subtracted 3 from both sides. Now double-check: what is 12 divided by 2?\\"}"}}\n\n'
 
                 "Tool Observation: SAFE - Guides without revealing answer\n\n"
 
                 "Thought: Validated. Provide final response.\n"
-                "Action: {\"tool_name\": \"final_answer\", \"tool_input\": \"Good start! You correctly subtracted 3 "
-                "from both sides to get 12. Now double-check: what is 12 divided by 2?\"}"
+                'Action: {"tool_name": "final_answer", "tool_input": "Good start! You correctly subtracted 3 '
+                'from both sides to get 12. Now double-check: what is 12 divided by 2?"}'
             )
         ])
-        
+
         return builder

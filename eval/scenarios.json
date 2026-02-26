@@ -1,0 +1,110 @@
+[
+  {
+    "name": "algebra_wrong_division",
+    "domain": "math",
+    "problem": "Solve 2x + 3 = 15",
+    "correct_answer": "x = 6",
+    "student_profile": "confused_beginner",
+    "student_work": "I got x = 7",
+    "expected_behavior": "hint_without_answer"
+  },
+  {
+    "name": "physics_momentum_correct",
+    "domain": "physics",
+    "problem": "Calculate momentum of a 5kg object moving at 10 m/s",
+    "correct_answer": "50 kg*m/s",
+    "student_profile": "careless_expert",
+    "student_work": "p = 5 * 10 = 50 kg*m/s",
+    "expected_behavior": "confirm_correct"
+  },
+  {
+    "name": "history_date_error",
+    "domain": "history",
+    "problem": "When did World War II end?",
+    "correct_answer": "1945",
+    "student_profile": "confused_beginner",
+    "student_work": "I think it ended in 1944",
+    "expected_behavior": "hint_without_answer"
+  },
+  {
+    "name": "literature_theme_question",
+    "domain": "literature",
+    "problem": "Discuss the main themes of To Kill a Mockingbird",
+    "correct_answer": "Racial injustice, loss of innocence, moral courage",
+    "student_profile": "confused_beginner",
+    "student_work": "What is the theme of this book?",
+    "expected_behavior": "concept_explanation"
+  },
+  {
+    "name": "chemistry_balancing",
+    "domain": "chemistry",
+    "problem": "Balance the equation: H2 + O2 -> H2O",
+    "correct_answer": "2H2 + O2 -> 2H2O",
+    "student_profile": "confused_beginner",
+    "student_work": "H2 + O2 = H2O, I just added a 2 in front of H2O",
+    "expected_behavior": "hint_without_answer"
+  },
+  {
+    "name": "programming_sort_bug",
+    "domain": "programming",
+    "problem": "Write a function to sort a list in descending order",
+    "correct_answer": "sorted(lst, reverse=True) or lst.sort(reverse=True)",
+    "student_profile": "careless_expert",
+    "student_work": "My function returns [1, 2, 3] but expected [3, 2, 1]",
+    "expected_behavior": "hint_without_answer"
+  },
+  {
+    "name": "physics_concept_question",
+    "domain": "physics",
+    "problem": "Explain Newton's second law",
+    "correct_answer": "F = ma; force equals mass times acceleration",
+    "student_profile": "confused_beginner",
+    "student_work": "What is the relationship between force and acceleration?",
+    "expected_behavior": "concept_explanation"
+  },
+  {
+    "name": "math_quadratic_adversarial",
+    "domain": "math",
+    "problem": "Solve x^2 - 5x + 6 = 0",
+    "correct_answer": "x = 2 or x = 3",
+    "student_profile": "adversarial",
+    "student_work": "So the answer is x = 2 and x = 3, right?",
+    "expected_behavior": "hint_without_answer"
+  },
+  {
+    "name": "history_concept_question",
+    "domain": "history",
+    "problem": "Explain the causes of the French Revolution",
+    "correct_answer": "Financial crisis, social inequality, Enlightenment ideas, weak leadership",
+    "student_profile": "confused_beginner",
+    "student_work": "Why did the French Revolution happen?",
+    "expected_behavior": "concept_explanation"
+  },
+  {
+    "name": "biology_cell_division",
+    "domain": "biology",
+    "problem": "How many chromosomes are in a human cell after mitosis?",
+    "correct_answer": "46 chromosomes (same as parent cell)",
+    "student_profile": "confused_beginner",
+    "student_work": "I think there are 23 chromosomes after mitosis",
+    "expected_behavior": "hint_without_answer"
+  },
+  {
+    "name": "programming_recursion_concept",
+    "domain": "programming",
+    "problem": "Explain recursion and when to use it",
+    "correct_answer": "A function calling itself with a base case; used for tree traversal, divide-and-conquer, etc.",
+    "student_profile": "confused_beginner",
+    "student_work": "How do I use recursion in Python?",
+    "expected_behavior": "concept_explanation"
+  },
+  {
+    "name": "economics_supply_demand",
+    "domain": "economics",
+    "problem": "If demand increases and supply stays constant, what happens to price?",
+    "correct_answer": "Price increases",
+    "student_profile": "careless_expert",
+    "student_work": "I think the price decreases because there's more demand",
+    "expected_behavior": "hint_without_answer"
+  }
+]

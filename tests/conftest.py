@@ -76,11 +76,23 @@ def mock_retriever_with_docs():
 def build_tool_input(**fields):
     """Build a |||−delimited tool input string from keyword arguments.
 
+    DEPRECATED: Use build_json_input() for new code.
+
     Example:
         build_tool_input(PROBLEM="Find x", STUDENT_WORK="x=5", TOPIC="algebra")
         # Returns: "PROBLEM: Find x ||| STUDENT_WORK: x=5 ||| TOPIC: algebra"
     """
     return " ||| ".join(f"{key}: {value}" for key, value in fields.items())
+
+
+def build_json_input(model_class, **fields):
+    """Build a JSON tool input string from a Pydantic model.
+
+    Example:
+        build_json_input(DiagnosticInput, problem="Find x", student_work="x=5", topic="algebra")
+        # Returns: '{"problem":"Find x","student_work":"x=5","topic":"algebra"}'
+    """
+    return model_class(**fields).model_dump_json()
 
 
 def build_tutor_runner(mock_llm=None, mock_retriever=None):

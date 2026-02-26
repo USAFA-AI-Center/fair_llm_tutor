@@ -19,20 +19,50 @@ class TestManagerAgentPrompt:
 
         builder = TutorManagerAgent._create_manager_prompt()
 
-        # Check role definition
         role_text = builder.role_definition.text
         assert "WORK_VALIDATION" not in role_text
         assert "QUESTION_ANSWERING" not in role_text
-        assert "MODE: HINT" in role_text
-        assert "MODE: CONCEPT_EXPLANATION" in role_text
+        assert "HINT" in role_text
+        assert "CONCEPT_EXPLANATION" in role_text
 
-        # Check format instructions
         for fi in builder.format_instructions:
             fi_text = fi.text
-            assert "WORK_VALIDATION" not in fi_text, \
-                f"Found WORK_VALIDATION in format instruction: {fi_text[:100]}"
-            assert "QUESTION_ANSWERING" not in fi_text, \
-                f"Found QUESTION_ANSWERING in format instruction: {fi_text[:100]}"
+            assert "WORK_VALIDATION" not in fi_text
+            assert "QUESTION_ANSWERING" not in fi_text
+
+    def test_prompt_uses_json_delegation_format(self):
+        """Verify delegation templates use JSON, not ||| format."""
+        from agents.manager_agent import TutorManagerAgent
+
+        builder = TutorManagerAgent._create_manager_prompt()
+
+        # Check format instructions contain JSON examples
+        all_fi_text = " ".join(fi.text for fi in builder.format_instructions)
+        assert "|||" not in all_fi_text, "Format instructions still contain ||| delimiter"
+        assert '"problem"' in all_fi_text or '"mode"' in all_fi_text
+
+    def test_prompt_examples_use_json_delegation(self):
+        """Verify examples use JSON delegation, not ||| format."""
+        from agents.manager_agent import TutorManagerAgent
+
+        builder = TutorManagerAgent._create_manager_prompt()
+
+        for example in builder.examples:
+            assert "|||" not in example.text, (
+                f"Example still contains ||| delimiter: {example.text[:100]}"
+            )
+
+    def test_prompt_examples_are_domain_diverse(self):
+        """Verify examples span multiple domains, not just physics/math."""
+        from agents.manager_agent import TutorManagerAgent
+
+        builder = TutorManagerAgent._create_manager_prompt()
+        all_example_text = " ".join(e.text for e in builder.examples).lower()
+
+        # Should have at least one non-STEM example
+        non_stem_indicators = ["literature", "history", "essay", "theme", "novel", "war"]
+        has_non_stem = any(ind in all_example_text for ind in non_stem_indicators)
+        assert has_non_stem, "Examples should include non-STEM domains"
 
     def test_prompt_has_correct_routing_logic(self):
         """Verify work submission routes to HINT, questions to CONCEPT_EXPLANATION."""
@@ -41,16 +71,8 @@ class TestManagerAgentPrompt:
         builder = TutorManagerAgent._create_manager_prompt()
         role_text = builder.role_definition.text
 
-        # The text should say: submitting work → HINT mode
         assert "submitting work" in role_text.lower() or "showing work" in role_text.lower()
         assert "guidance" in role_text.lower()
-
-        # Should NOT say submitting work → CONCEPT_EXPLANATION
-        # The corrected line should have work→HINT and guidance→CONCEPT_EXPLANATION
-        lines = role_text.split("\n")
-        for line in lines:
-            if "submitting work" in line.lower() and "MODE:" in line:
-                assert "HINT" in line, f"Work submission should route to HINT, got: {line}"
 
     def test_prompt_has_examples(self):
         from agents.manager_agent import TutorManagerAgent
@@ -70,7 +92,6 @@ class TestMisconceptionDetectorPrompt:
     """Tests for MisconceptionDetectorAgent prompt construction."""
 
     def test_no_empty_examples(self):
-        """Verify the empty Example('') bug is fixed."""
         from agents.misconception_detector_agent import MisconceptionDetectorAgent
 
         builder = MisconceptionDetectorAgent._create_diagnostic_prompt()
@@ -92,6 +113,14 @@ class TestMisconceptionDetectorPrompt:
         builder = MisconceptionDetectorAgent._create_diagnostic_prompt()
         assert len(builder.format_instructions) > 0
 
+    def test_uses_json_tool_input_format(self):
+        """Verify tool input format instructions use JSON, not |||."""
+        from agents.misconception_detector_agent import MisconceptionDetectorAgent
+
+        builder = MisconceptionDetectorAgent._create_diagnostic_prompt()
+        all_fi_text = " ".join(fi.text for fi in builder.format_instructions)
+        assert "|||" not in all_fi_text, "Format instructions still contain ||| delimiter"
+
 
 class TestHintGeneratorPrompt:
     """Tests for HintGeneratorAgent prompt construction."""
@@ -109,6 +138,24 @@ class TestHintGeneratorPrompt:
         builder = HintGeneratorAgent._create_hint_prompt()
         assert len(builder.format_instructions) > 0
 
+    def test_uses_json_tool_input_format(self):
+        """Verify tool input format instructions use JSON, not |||."""
+        from agents.hint_generator_agent import HintGeneratorAgent
+
+        builder = HintGeneratorAgent._create_hint_prompt()
+        all_fi_text = " ".join(fi.text for fi in builder.format_instructions)
+        assert "|||" not in all_fi_text, "Format instructions still contain ||| delimiter"
+
+    def test_examples_use_json(self):
+        """Verify examples use JSON format."""
+        from agents.hint_generator_agent import HintGeneratorAgent
+
+        builder = HintGeneratorAgent._create_hint_prompt()
+        for example in builder.examples:
+            assert "|||" not in example.text, (
+                f"Example still contains ||| delimiter: {example.text[:100]}"
+            )
+
 
 class TestSafetyGuardPrompt:
     """Tests for SafetyGuardAgent prompt construction."""
@@ -119,3 +166,21 @@ class TestSafetyGuardPrompt:
         builder = SafetyGuardAgent._create_safety_prompt()
         assert builder.role_definition is not None
         assert len(builder.role_definition.text) > 50
+
+    def test_uses_json_tool_input_format(self):
+        """Verify tool input format instructions use JSON, not |||."""
+        from agents.safety_guard_agent import SafetyGuardAgent
+
+        builder = SafetyGuardAgent._create_safety_prompt()
+        all_fi_text = " ".join(fi.text for fi in builder.format_instructions)
+        assert "|||" not in all_fi_text, "Format instructions still contain ||| delimiter"
+
+    def test_examples_use_json(self):
+        """Verify examples use JSON format."""
+        from agents.safety_guard_agent import SafetyGuardAgent
+
+        builder = SafetyGuardAgent._create_safety_prompt()
+        for example in builder.examples:
+            assert "|||" not in example.text, (
+                f"Example still contains ||| delimiter: {example.text[:100]}"
+            )

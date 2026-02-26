@@ -8,60 +8,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tools.safety_tools import AnswerRevelationAnalyzerTool
-from tests.conftest import MockLLM, build_tool_input
-
-
-class TestExtractStudentAnswersFromHistory:
-    """Tests for _extract_student_answers_from_history."""
-
-    def setup_method(self):
-        self.tool = AnswerRevelationAnalyzerTool(llm=MockLLM())
-
-    def test_empty_history_returns_empty(self):
-        assert self.tool._extract_student_answers_from_history("") == []
-
-    def test_empty_brackets_returns_empty(self):
-        assert self.tool._extract_student_answers_from_history("[]") == []
-
-    def test_none_returns_empty(self):
-        assert self.tool._extract_student_answers_from_history(None) == []
-
-    def test_extracts_answer_with_units(self):
-        history = "['I calculated 50 kg m/s']"
-        result = self.tool._extract_student_answers_from_history(history)
-        assert len(result) >= 1
-
-    def test_extracts_answer_with_keyword(self):
-        history = "my answer is 42"
-        result = self.tool._extract_student_answers_from_history(history)
-        assert len(result) >= 1
-
-    def test_no_answer_content_returns_empty(self):
-        history = "hello"
-        result = self.tool._extract_student_answers_from_history(history)
-        assert result == []
-
-
-class TestNormalizeAnswer:
-    """Tests for _normalize_answer."""
-
-    def setup_method(self):
-        self.tool = AnswerRevelationAnalyzerTool(llm=MockLLM())
-
-    def test_strips_whitespace(self):
-        assert self.tool._normalize_answer("  50  ") == "50"
-
-    def test_removes_multiplication_symbols(self):
-        result = self.tool._normalize_answer("50*kg")
-        assert "*" not in result
-
-    def test_lowercases(self):
-        result = self.tool._normalize_answer("50 KG")
-        assert result == "50kg"
-
-    def test_removes_spaces(self):
-        result = self.tool._normalize_answer("50 kg m/s")
-        assert " " not in result
+from tools.schemas import SafetyInput
+from tests.conftest import MockLLM, build_json_input
 
 
 class TestExtractVerdict:
@@ -102,16 +50,16 @@ class TestExtractVerdict:
 class TestAnswerRevelationAnalyzerUse:
     """Tests for the main use() method."""
 
-    def test_parses_all_four_fields(self):
-        """Verify label-based parsing works for all 4 fields (bug fix 1A)."""
+    def test_parses_json_input(self):
         llm = MockLLM("VERDICT: SAFE\nREASONING: OK")
         tool = AnswerRevelationAnalyzerTool(llm=llm)
 
-        tool_input = build_tool_input(
-            PROBLEM="Find derivative of x^2",
-            CORRECT_ANSWER="2x",
-            STUDENT_HISTORY="[]",
-            PROPOSED_RESPONSE="Think about the power rule."
+        tool_input = build_json_input(
+            SafetyInput,
+            problem="Find derivative of x^2",
+            correct_answer="2x",
+            student_history=[],
+            proposed_response="Think about the power rule."
         )
 
         result = tool.use(tool_input)
@@ -122,11 +70,12 @@ class TestAnswerRevelationAnalyzerUse:
         llm = MockLLM("VERDICT: UNSAFE\nREASONING: Response states the answer directly.")
         tool = AnswerRevelationAnalyzerTool(llm=llm)
 
-        tool_input = build_tool_input(
-            PROBLEM="What is 5 * 10?",
-            CORRECT_ANSWER="50",
-            STUDENT_HISTORY="[]",
-            PROPOSED_RESPONSE="The answer is 50."
+        tool_input = build_json_input(
+            SafetyInput,
+            problem="What is 5 * 10?",
+            correct_answer="50",
+            student_history=[],
+            proposed_response="The answer is 50."
         )
 
         result = tool.use(tool_input)
@@ -137,44 +86,70 @@ class TestAnswerRevelationAnalyzerUse:
         llm = MockLLM("VERDICT: SAFE\nREASONING: Student already gave this answer.")
         tool = AnswerRevelationAnalyzerTool(llm=llm)
 
-        tool_input = build_tool_input(
-            PROBLEM="Calculate momentum of 5kg at 10m/s",
-            CORRECT_ANSWER="50 kg m/s",
-            STUDENT_HISTORY="['my answer is 50 kg m/s']",
-            PROPOSED_RESPONSE="Excellent! Your answer of 50 kg*m/s is correct!"
+        tool_input = build_json_input(
+            SafetyInput,
+            problem="Calculate momentum of 5kg at 10m/s",
+            correct_answer="50 kg m/s",
+            student_history=["my answer is 50 kg m/s"],
+            proposed_response="Excellent! Your answer of 50 kg*m/s is correct!"
         )
 
         result = tool.use(tool_input)
         assert "SAFE" in result
 
-    def test_handles_missing_fields_gracefully(self):
-        """Tool should not crash if some fields are missing."""
+    def test_invalid_json_returns_error(self):
         llm = MockLLM("VERDICT: SAFE\nREASONING: OK")
         tool = AnswerRevelationAnalyzerTool(llm=llm)
 
-        result = tool.use("PROBLEM: some problem")
-        # Should not crash, should still return something
-        assert isinstance(result, str)
+        result = tool.use("not valid json")
+        assert "ERROR" in result
 
-    def test_no_double_parsing_bug(self):
-        """Verify the double-parsing bug (lines 116-118) is fixed.
-
-        Previously, positional indexing overwrote label-based parsing,
-        causing parts[2] (STUDENT_HISTORY) to be used as PROPOSED_RESPONSE.
-        """
-        llm = MockLLM("VERDICT: UNSAFE\nREASONING: Response gives answer.")
+    def test_missing_proposed_response_returns_error(self):
+        llm = MockLLM("VERDICT: SAFE\nREASONING: OK")
         tool = AnswerRevelationAnalyzerTool(llm=llm)
 
-        # With 4 fields, parts[2] is STUDENT_HISTORY, not PROPOSED_RESPONSE
-        tool_input = (
-            "PROBLEM: What is 2+2? ||| "
-            "CORRECT_ANSWER: 4 ||| "
-            "STUDENT_HISTORY: [I think it might be 3] ||| "
-            "PROPOSED_RESPONSE: The answer is 4!"
+        tool_input = build_json_input(
+            SafetyInput,
+            problem="Solve x",
+            correct_answer="5",
+            student_history=[],
+            proposed_response=""
         )
 
         result = tool.use(tool_input)
-        # The LLM should have received the actual proposed_response, not student_history
+        assert "ERROR" in result
+
+    def test_proposed_response_sent_to_llm(self):
+        """Verify the LLM receives the actual proposed_response."""
+        llm = MockLLM("VERDICT: UNSAFE\nREASONING: Response gives answer.")
+        tool = AnswerRevelationAnalyzerTool(llm=llm)
+
+        tool_input = build_json_input(
+            SafetyInput,
+            problem="What is 2+2?",
+            correct_answer="4",
+            student_history=["I think it might be 3"],
+            proposed_response="The answer is 4!"
+        )
+
+        result = tool.use(tool_input)
+        # The LLM should have received the actual proposed_response
         prompt_sent = llm.last_messages[0].content
         assert "The answer is 4!" in prompt_sent
         assert "PROPOSED RESPONSE TO VALIDATE: The answer is 4!" in prompt_sent
+
+    def test_student_history_as_list(self):
+        """student_history is now a proper list, not a stringified one."""
+        llm = MockLLM("VERDICT: SAFE\nREASONING: Student already answered.")
+        tool = AnswerRevelationAnalyzerTool(llm=llm)
+
+        tool_input = build_json_input(
+            SafetyInput,
+            problem="What is 2+2?",
+            correct_answer="4",
+            student_history=["I got 4", "Is 4 correct?"],
+            proposed_response="Yes, 4 is correct!"
+        )
+
+        result = tool.use(tool_input)
+        assert "SAFE" in result

@@ -8,59 +8,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tools.diagnostic_tools import StudentWorkAnalyzerTool
-from tests.conftest import MockLLM, MockRetriever, build_tool_input
-
-
-class TestExtractUnitsFromWork:
-    """Tests for _extract_units_from_work."""
-
-    def setup_method(self):
-        self.tool = StudentWorkAnalyzerTool(
-            llm=MockLLM(),
-            retriever=MockRetriever()
-        )
-
-    def test_finds_kg_m_s_units(self):
-        result = self.tool._extract_units_from_work("I got 50 kg m/s")
-        assert len(result) >= 1
-
-    def test_finds_newtons(self):
-        result = self.tool._extract_units_from_work("The force is 100 N")
-        assert len(result) >= 1
-
-    def test_finds_joules(self):
-        result = self.tool._extract_units_from_work("Energy = 200 J")
-        assert len(result) >= 1
-
-    def test_no_units_returns_empty(self):
-        result = self.tool._extract_units_from_work("I think the answer is big")
-        assert result == []
-
-    def test_finds_meters_per_second(self):
-        result = self.tool._extract_units_from_work("velocity is 25 m/s")
-        assert len(result) >= 1
-
-
-class TestCheckForMissingUnits:
-    """Tests for _check_for_missing_units."""
-
-    def setup_method(self):
-        self.tool = StudentWorkAnalyzerTool(
-            llm=MockLLM(),
-            retriever=MockRetriever()
-        )
-
-    def test_standalone_number_detected(self):
-        assert self.tool._check_for_missing_units("50") is True
-
-    def test_number_with_answer_keyword(self):
-        assert self.tool._check_for_missing_units("answer = 50") is True
-
-    def test_number_with_units_not_flagged(self):
-        assert self.tool._check_for_missing_units("50 kg m/s") is False
-
-    def test_text_without_numbers_not_flagged(self):
-        assert self.tool._check_for_missing_units("I used the formula p = mv") is False
+from tools.schemas import DiagnosticInput
+from tests.conftest import MockLLM, MockRetriever, build_json_input
 
 
 class TestExtractSeverity:
@@ -96,10 +45,9 @@ class TestExtractSeverity:
 class TestStudentWorkAnalyzerUse:
     """Tests for the main use() method."""
 
-    def test_valid_three_part_input(self):
+    def test_valid_json_input(self):
         llm_response = (
             "CORRECT_ASPECTS: Student applied the formula\n"
-            "UNITS_CHECK: Present and correct\n"
             "ERROR_IDENTIFIED: None\n"
             "ROOT_MISCONCEPTION: None\n"
             "SEVERITY: Minor\n"
@@ -110,40 +58,49 @@ class TestStudentWorkAnalyzerUse:
         retriever = MockRetriever(documents=["Momentum is p = mv"])
         tool = StudentWorkAnalyzerTool(llm=llm, retriever=retriever)
 
-        tool_input = build_tool_input(
-            PROBLEM="Calculate momentum",
-            STUDENT_WORK="p = 5 * 10 = 50 kg m/s",
-            TOPIC="physics"
+        tool_input = build_json_input(
+            DiagnosticInput,
+            problem="Calculate momentum",
+            student_work="p = 5 * 10 = 50 kg m/s",
+            topic="physics"
         )
 
         result = tool.use(tool_input)
         assert "ANALYSIS COMPLETE" in result
         assert "Minor" in result
 
-    def test_fewer_than_three_parts_returns_error(self):
+    def test_invalid_json_returns_error(self):
         tool = StudentWorkAnalyzerTool(
             llm=MockLLM(),
             retriever=MockRetriever()
         )
-        result = tool.use("PROBLEM: some problem")
+        result = tool.use("not valid json")
+        assert "ERROR" in result
+
+    def test_missing_parts_returns_error(self):
+        tool = StudentWorkAnalyzerTool(
+            llm=MockLLM(),
+            retriever=MockRetriever()
+        )
+        result = tool.use('{"problem": "some problem"}')
         assert "ERROR" in result
 
     def test_retriever_called_with_top_k(self):
-        """Verify retriever uses top_k parameter (bug fix 1C)."""
+        """Verify retriever uses top_k parameter."""
         retriever = MockRetriever(documents=["doc1", "doc2", "doc3"])
         tool = StudentWorkAnalyzerTool(
             llm=MockLLM("SEVERITY: Minor\nAnalysis complete."),
             retriever=retriever
         )
 
-        tool_input = build_tool_input(
-            PROBLEM="Find x",
-            STUDENT_WORK="x = 5",
-            TOPIC="algebra"
+        tool_input = build_json_input(
+            DiagnosticInput,
+            problem="Find x",
+            student_work="x = 5",
+            topic="algebra"
         )
 
         tool.use(tool_input)
-        # Should have called retrieve with top_k, not k
         assert retriever.last_query is not None
         assert retriever.last_top_k == 3
 
@@ -153,10 +110,68 @@ class TestStudentWorkAnalyzerUse:
             retriever=MockRetriever(documents=[])
         )
 
-        tool_input = build_tool_input(
-            PROBLEM="Find derivative",
-            STUDENT_WORK="dy/dx = 2x",
-            TOPIC="calculus"
+        tool_input = build_json_input(
+            DiagnosticInput,
+            problem="Find derivative",
+            student_work="dy/dx = 2x",
+            topic="calculus"
+        )
+
+        result = tool.use(tool_input)
+        assert "ANALYSIS COMPLETE" in result
+
+    def test_empty_problem_returns_error(self):
+        tool = StudentWorkAnalyzerTool(
+            llm=MockLLM(),
+            retriever=MockRetriever()
+        )
+        tool_input = build_json_input(
+            DiagnosticInput,
+            problem="",
+            student_work="x=5",
+            topic="algebra"
+        )
+        result = tool.use(tool_input)
+        assert "ERROR" in result
+
+    def test_empty_student_work_returns_error(self):
+        tool = StudentWorkAnalyzerTool(
+            llm=MockLLM(),
+            retriever=MockRetriever()
+        )
+        tool_input = build_json_input(
+            DiagnosticInput,
+            problem="Solve x+1=2",
+            student_work="",
+            topic="algebra"
+        )
+        result = tool.use(tool_input)
+        assert "ERROR" in result
+
+    def test_empty_topic_returns_error(self):
+        tool = StudentWorkAnalyzerTool(
+            llm=MockLLM(),
+            retriever=MockRetriever()
+        )
+        tool_input = build_json_input(
+            DiagnosticInput,
+            problem="Solve x+1=2",
+            student_work="x=1",
+            topic=""
+        )
+        result = tool.use(tool_input)
+        assert "ERROR" in result
+
+    def test_student_work_with_special_chars(self):
+        """JSON handles special characters that would break ||| parsing."""
+        llm = MockLLM("SEVERITY: Minor\nAll good.")
+        tool = StudentWorkAnalyzerTool(llm=llm, retriever=MockRetriever())
+
+        tool_input = build_json_input(
+            DiagnosticInput,
+            problem="Evaluate the ratio",
+            student_work='The ratio is 2:3 and I think "maybe" it works',
+            topic="math"
         )
 
         result = tool.use(tool_input)
