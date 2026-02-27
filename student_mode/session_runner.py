@@ -298,25 +298,40 @@ def run_session(
     print(f"[session {session_id}] Turns: {min_turns}-{max_turns}")
     print()
 
-    # ── Spawn the tutor process (stderr → file) ────────────────────────
-    child = pexpect.spawn(
-        "/bin/bash", ["-c", f"{cmd} 2>{stderr_path}"],
-        encoding="utf-8", timeout=timeout, cwd=project_dir,
-    )
+    # ── Spawn the tutor process ─────────────────────────────────────────
+    # Spawn directly (no bash wrapper). Python's input() writes its prompt
+    # to stderr when stdin is a TTY, so shell-level `2>file` redirection
+    # would swallow the "You: " prompt and break pexpect matching.
+    # Instead we capture the full PTY output via logfile_read and extract
+    # log-formatted lines (HH:MM:SS [module] LEVEL: ...) after each turn.
+    child = pexpect.spawn(cmd, encoding="utf-8", timeout=timeout, cwd=project_dir)
 
-    # Incremental stderr reader — returns only new content since last call
+    _stderr_fh = open(stderr_path, "w", encoding="utf-8")
+    child.logfile_read = _stderr_fh
+
+    # Regex for lines produced by Python's logging module
+    _LOG_LINE_RE = re.compile(r"^\d{2}:\d{2}:\d{2} \[")
+
+    # Incremental stderr reader — returns only new log-formatted content
+    # since last call, filtering out stdout content from the raw PTY log.
     _stderr_pos = 0
 
     def _read_new_stderr() -> str:
         nonlocal _stderr_pos
+        _stderr_fh.flush()
         try:
             with open(stderr_path, "r", encoding="utf-8", errors="replace") as fh:
                 fh.seek(_stderr_pos)
-                new = fh.read()
+                raw = fh.read()
                 _stderr_pos = fh.tell()
-            return new
         except FileNotFoundError:
             return ""
+        # Extract only lines matching the logging format
+        log_lines = [
+            ln for ln in raw.splitlines()
+            if _LOG_LINE_RE.match(ln.strip())
+        ]
+        return "\n".join(log_lines) if log_lines else ""
 
     try:
         # Wait for welcome banner
@@ -450,6 +465,8 @@ def run_session(
         logger.error(f"Tutor process exited unexpectedly: {e}")
         print(f"\n[session {session_id}] ERROR: Tutor process exited")
     finally:
+        child.logfile_read = None
+        _stderr_fh.close()
         if child.isalive():
             child.close(force=True)
 
@@ -603,7 +620,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # LLM-driven student (uses OpenAI to generate student responses)
+  # LLM-driven student (uses Anthropic to generate student responses)
   python -m student_mode.session_runner \\
       --topic calculus \\
       --problem "Find the derivative of 3x^2 + 2x - 5" \\
