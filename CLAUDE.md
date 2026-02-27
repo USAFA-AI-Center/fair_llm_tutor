@@ -8,6 +8,11 @@ fair_llm_tutor is a domain-agnostic, multi-agent Socratic tutoring system built 
 
 ## Commands
 
+**IMPORTANT: Always activate the virtual environment before running any Python commands:**
+```bash
+source ~/fair_llm_tutor/.venv/bin/activate
+```
+
 ```bash
 # Install dependencies (requires local fairlib at ~/fair_llm)
 pip install -r requirements.txt
