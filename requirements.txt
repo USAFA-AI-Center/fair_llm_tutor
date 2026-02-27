@@ -3,5 +3,5 @@ rich>=14.0.0
 chromadb>=0.4.0
 sentence-transformers>=2.2.0
 pyyaml>=6.0.0
-fair-llm>=0.2.0
+fair-llm @ file:///home/ai-user/fair_llm
 pytest>=8.0.0
