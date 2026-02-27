@@ -88,99 +88,131 @@ class TestManagerAgentPrompt:
         assert len(builder.role_definition.text) > 100
 
 
-class TestMisconceptionDetectorPrompt:
-    """Tests for MisconceptionDetectorAgent prompt construction."""
+class TestMisconceptionDetectorAgent:
+    """Tests for MisconceptionDetectorAgent with DirectToolPlanner."""
 
-    def test_no_empty_examples(self):
+    def test_uses_direct_tool_planner(self):
+        from fairlib import WorkingMemory
+        from fairlib.modules.planning.direct_planner import DirectToolPlanner
         from agents.misconception_detector_agent import MisconceptionDetectorAgent
 
-        builder = MisconceptionDetectorAgent._create_diagnostic_prompt()
+        agent = MisconceptionDetectorAgent.create(
+            MockLLM(), WorkingMemory(), MockRetriever()
+        )
+        assert isinstance(agent.planner, DirectToolPlanner)
 
-        for example in builder.examples:
-            assert example.text.strip() != "", \
-                "Found empty example in MisconceptionDetector prompt"
-
-    def test_has_role_definition(self):
+    def test_correct_tool_name(self):
+        from fairlib import WorkingMemory
         from agents.misconception_detector_agent import MisconceptionDetectorAgent
 
-        builder = MisconceptionDetectorAgent._create_diagnostic_prompt()
-        assert builder.role_definition is not None
-        assert len(builder.role_definition.text) > 50
+        agent = MisconceptionDetectorAgent.create(
+            MockLLM(), WorkingMemory(), MockRetriever()
+        )
+        assert agent.planner.tool_name == "student_work_analyzer"
 
-    def test_has_format_instructions(self):
+    def test_is_stateless(self):
+        from fairlib import WorkingMemory
         from agents.misconception_detector_agent import MisconceptionDetectorAgent
 
-        builder = MisconceptionDetectorAgent._create_diagnostic_prompt()
-        assert len(builder.format_instructions) > 0
+        agent = MisconceptionDetectorAgent.create(
+            MockLLM(), WorkingMemory(), MockRetriever()
+        )
+        assert agent.stateless is True
 
-    def test_uses_json_tool_input_format(self):
-        """Verify tool input format instructions use JSON, not |||."""
+    def test_has_tool_name_constant(self):
         from agents.misconception_detector_agent import MisconceptionDetectorAgent
 
-        builder = MisconceptionDetectorAgent._create_diagnostic_prompt()
-        all_fi_text = " ".join(fi.text for fi in builder.format_instructions)
-        assert "|||" not in all_fi_text, "Format instructions still contain ||| delimiter"
+        assert MisconceptionDetectorAgent.TOOL_NAME == "student_work_analyzer"
+
+    def test_max_steps_reduced(self):
+        from fairlib import WorkingMemory
+        from agents.misconception_detector_agent import MisconceptionDetectorAgent
+
+        agent = MisconceptionDetectorAgent.create(
+            MockLLM(), WorkingMemory(), MockRetriever()
+        )
+        assert agent.max_steps == 3
 
 
-class TestHintGeneratorPrompt:
-    """Tests for HintGeneratorAgent prompt construction."""
+class TestHintGeneratorAgent:
+    """Tests for HintGeneratorAgent with DirectToolPlanner."""
 
-    def test_has_role_definition(self):
+    def test_uses_direct_tool_planner(self):
+        from fairlib import WorkingMemory
+        from fairlib.modules.planning.direct_planner import DirectToolPlanner
         from agents.hint_generator_agent import HintGeneratorAgent
 
-        builder = HintGeneratorAgent._create_hint_prompt()
-        assert builder.role_definition is not None
-        assert len(builder.role_definition.text) > 50
+        agent = HintGeneratorAgent.create(
+            MockLLM(), WorkingMemory(), MockRetriever()
+        )
+        assert isinstance(agent.planner, DirectToolPlanner)
 
-    def test_has_format_instructions(self):
+    def test_correct_tool_name(self):
+        from fairlib import WorkingMemory
         from agents.hint_generator_agent import HintGeneratorAgent
 
-        builder = HintGeneratorAgent._create_hint_prompt()
-        assert len(builder.format_instructions) > 0
+        agent = HintGeneratorAgent.create(
+            MockLLM(), WorkingMemory(), MockRetriever()
+        )
+        assert agent.planner.tool_name == "socratic_hint_generator"
 
-    def test_uses_json_tool_input_format(self):
-        """Verify tool input format instructions use JSON, not |||."""
+    def test_is_stateless(self):
+        from fairlib import WorkingMemory
         from agents.hint_generator_agent import HintGeneratorAgent
 
-        builder = HintGeneratorAgent._create_hint_prompt()
-        all_fi_text = " ".join(fi.text for fi in builder.format_instructions)
-        assert "|||" not in all_fi_text, "Format instructions still contain ||| delimiter"
+        agent = HintGeneratorAgent.create(
+            MockLLM(), WorkingMemory(), MockRetriever()
+        )
+        assert agent.stateless is True
 
-    def test_examples_use_json(self):
-        """Verify examples use JSON format."""
+    def test_has_tool_name_constant(self):
         from agents.hint_generator_agent import HintGeneratorAgent
 
-        builder = HintGeneratorAgent._create_hint_prompt()
-        for example in builder.examples:
-            assert "|||" not in example.text, (
-                f"Example still contains ||| delimiter: {example.text[:100]}"
-            )
+        assert HintGeneratorAgent.TOOL_NAME == "socratic_hint_generator"
+
+    def test_max_steps_reduced(self):
+        from fairlib import WorkingMemory
+        from agents.hint_generator_agent import HintGeneratorAgent
+
+        agent = HintGeneratorAgent.create(
+            MockLLM(), WorkingMemory(), MockRetriever()
+        )
+        assert agent.max_steps == 3
 
 
-class TestSafetyGuardPrompt:
-    """Tests for SafetyGuardAgent prompt construction."""
+class TestSafetyGuardAgent:
+    """Tests for SafetyGuardAgent with DirectToolPlanner."""
 
-    def test_has_role_definition(self):
+    def test_uses_direct_tool_planner(self):
+        from fairlib import WorkingMemory
+        from fairlib.modules.planning.direct_planner import DirectToolPlanner
         from agents.safety_guard_agent import SafetyGuardAgent
 
-        builder = SafetyGuardAgent._create_safety_prompt()
-        assert builder.role_definition is not None
-        assert len(builder.role_definition.text) > 50
+        agent = SafetyGuardAgent.create(MockLLM(), WorkingMemory())
+        assert isinstance(agent.planner, DirectToolPlanner)
 
-    def test_uses_json_tool_input_format(self):
-        """Verify tool input format instructions use JSON, not |||."""
+    def test_correct_tool_name(self):
+        from fairlib import WorkingMemory
         from agents.safety_guard_agent import SafetyGuardAgent
 
-        builder = SafetyGuardAgent._create_safety_prompt()
-        all_fi_text = " ".join(fi.text for fi in builder.format_instructions)
-        assert "|||" not in all_fi_text, "Format instructions still contain ||| delimiter"
+        agent = SafetyGuardAgent.create(MockLLM(), WorkingMemory())
+        assert agent.planner.tool_name == "answer_revelation_analyzer"
 
-    def test_examples_use_json(self):
-        """Verify examples use JSON format."""
+    def test_is_stateless(self):
+        from fairlib import WorkingMemory
         from agents.safety_guard_agent import SafetyGuardAgent
 
-        builder = SafetyGuardAgent._create_safety_prompt()
-        for example in builder.examples:
-            assert "|||" not in example.text, (
-                f"Example still contains ||| delimiter: {example.text[:100]}"
-            )
+        agent = SafetyGuardAgent.create(MockLLM(), WorkingMemory())
+        assert agent.stateless is True
+
+    def test_has_tool_name_constant(self):
+        from agents.safety_guard_agent import SafetyGuardAgent
+
+        assert SafetyGuardAgent.TOOL_NAME == "answer_revelation_analyzer"
+
+    def test_max_steps_reduced(self):
+        from fairlib import WorkingMemory
+        from agents.safety_guard_agent import SafetyGuardAgent
+
+        agent = SafetyGuardAgent.create(MockLLM(), WorkingMemory())
+        assert agent.max_steps == 3
