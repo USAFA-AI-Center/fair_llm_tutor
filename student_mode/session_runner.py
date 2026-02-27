@@ -33,6 +33,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
 import uuid
@@ -234,7 +235,7 @@ def run_session(
     max_turns: int = 15,
     min_turns: int = 5,
     timeout: int = 300,
-    log_level: str = "WARNING",
+    log_level: str = "INFO",
 ) -> dict:
     """
     Run a complete autonomous tutoring session from start to finish.
@@ -286,17 +287,36 @@ def run_session(
         cmd += f" --config {tutor_config}"
 
     project_dir = str(Path(__file__).resolve().parent.parent)
+    stderr_path = output_path.replace(".jsonl", ".stderr.log")
     records = []
     turn = 0
 
     print(f"[session {session_id}] Starting tutor: {cmd}")
     print(f"[session {session_id}] Output: {output_path}")
+    print(f"[session {session_id}] Stderr: {stderr_path}")
     print(f"[session {session_id}] Student: {'LLM (' + student_llm_provider + ')' if student_llm else 'deterministic'}")
     print(f"[session {session_id}] Turns: {min_turns}-{max_turns}")
     print()
 
-    # ── Spawn the tutor process ──────────────────────────────────────────
-    child = pexpect.spawn(cmd, encoding="utf-8", timeout=timeout, cwd=project_dir)
+    # ── Spawn the tutor process (stderr → file) ────────────────────────
+    child = pexpect.spawn(
+        "/bin/bash", ["-c", f"{cmd} 2>{stderr_path}"],
+        encoding="utf-8", timeout=timeout, cwd=project_dir,
+    )
+
+    # Incremental stderr reader — returns only new content since last call
+    _stderr_pos = 0
+
+    def _read_new_stderr() -> str:
+        nonlocal _stderr_pos
+        try:
+            with open(stderr_path, "r", encoding="utf-8", errors="replace") as fh:
+                fh.seek(_stderr_pos)
+                new = fh.read()
+                _stderr_pos = fh.tell()
+            return new
+        except FileNotFoundError:
+            return ""
 
     try:
         # Wait for welcome banner
@@ -382,7 +402,16 @@ def run_session(
             end_time = time.monotonic()
             latency_ms = int((end_time - start_time) * 1000)
 
-            record = _make_record(session_id, turn, student_input, tutor_response, latency_ms, module)
+            # Capture stderr and detect framework issues for this turn
+            turn_stderr = _read_new_stderr()
+            turn_issues = _detect_framework_issues(tutor_response)
+
+            record = _make_record(
+                session_id, turn, student_input, tutor_response,
+                latency_ms, module,
+                framework_issues=turn_issues if turn_issues else None,
+                stderr=turn_stderr if turn_stderr.strip() else None,
+            )
             records.append(record)
             _write_record(output_path, record)
 
@@ -392,6 +421,9 @@ def run_session(
             print(f"  [turn {turn}] Student: {student_input[:80]}...")
             print(f"           Tutor: {tutor_response[:80]}...")
             print(f"           Latency: {latency_ms}ms")
+            if turn_issues:
+                for issue in turn_issues:
+                    print(f"           WARNING: [{issue['type']}] {issue['detail']}")
 
             # Check if we should stop (after min_turns)
             if student_turns >= min_turns:
@@ -421,6 +453,10 @@ def run_session(
         if child.isalive():
             child.close(force=True)
 
+    # ── Capture exit status ──────────────────────────────────────────────
+    exit_code = child.exitstatus      # None if killed by signal
+    signal_status = child.signalstatus  # None if exited normally
+
     # ── Print summary ────────────────────────────────────────────────────
     work_records = [
         r for r in records
@@ -430,9 +466,22 @@ def run_session(
     total_latency = sum(r["latency_ms"] for r in work_records)
     avg_latency = total_latency // len(work_records) if work_records else 0
 
+    # Aggregate framework issues across all turns
+    all_issues = []
+    turns_with_issues = 0
+    for r in records:
+        if r.get("framework_issues"):
+            all_issues.extend(r["framework_issues"])
+            turns_with_issues += 1
+
+    issues_by_type: dict[str, int] = {}
+    for issue in all_issues:
+        issues_by_type[issue["type"]] = issues_by_type.get(issue["type"], 0) + 1
+
     summary = {
         "session_id": session_id,
         "output_path": output_path,
+        "stderr_path": stderr_path,
         "topic": topic,
         "problem": problem,
         "total_turns": len(records),
@@ -440,6 +489,11 @@ def run_session(
         "total_latency_ms": total_latency,
         "avg_latency_ms": avg_latency,
         "student_mode": student_llm_provider or "deterministic",
+        "exit_code": exit_code,
+        "signal_status": signal_status,
+        "framework_issues_total": len(all_issues),
+        "framework_issues_by_type": issues_by_type if issues_by_type else None,
+        "turns_with_issues": turns_with_issues,
     }
 
     print(f"\n{'=' * 60}")
@@ -447,17 +501,80 @@ def run_session(
     print(f"{'=' * 60}")
     print(f"  Session ID:     {session_id}")
     print(f"  JSONL output:   {output_path}")
+    print(f"  Stderr log:     {stderr_path}")
     print(f"  Work turns:     {len(work_records)}")
     print(f"  Avg latency:    {avg_latency}ms")
     print(f"  Student mode:   {summary['student_mode']}")
+    print(f"  Exit code:      {exit_code}")
+    if signal_status is not None:
+        print(f"  Signal:         {signal_status}")
+    print(f"  Framework issues: {len(all_issues)} total across {turns_with_issues} turns")
+    if issues_by_type:
+        for itype, count in sorted(issues_by_type.items()):
+            print(f"    - {itype}: {count}")
     print(f"{'=' * 60}")
 
     return summary
 
 
+def _detect_framework_issues(tutor_response: str) -> list[dict]:
+    """Scan a tutor response for known fairlib failure patterns.
+
+    Returns a list of dicts with ``type`` and ``detail`` keys, or an empty
+    list when no issues are found.
+    """
+    issues: list[dict] = []
+
+    # Empty / blank response
+    if not tutor_response or not tutor_response.strip():
+        issues.append({"type": "empty_response", "detail": "Tutor returned a blank response"})
+        return issues  # nothing else to check
+
+    # Leaked thought chain (internal reasoning exposed to student)
+    if re.match(r"^\s*Thought:", tutor_response):
+        issues.append({
+            "type": "leaked_thought_chain",
+            "detail": "Response starts with 'Thought:' — internal reasoning leaked",
+        })
+
+    # Leaked tool call JSON fragments
+    if re.search(r'"tool_name"\s*:\s*"(delegate|final_answer)"', tutor_response):
+        issues.append({
+            "type": "leaked_tool_call",
+            "detail": "Response contains raw tool_name JSON (delegate/final_answer)",
+        })
+
+    # Leaked worker/agent names
+    worker_match = re.search(r"\b(SafetyGuard|MisconceptionDetector|HintGenerator)\b", tutor_response)
+    if worker_match:
+        issues.append({
+            "type": "leaked_worker_name",
+            "detail": f"Response mentions internal agent name: {worker_match.group(1)}",
+        })
+
+    # JSON format errors propagated from fairlib
+    if re.search(r"(incorrect JSON|not formatted correctly|JSON parse|JSONDecodeError)", tutor_response, re.IGNORECASE):
+        issues.append({
+            "type": "json_format_error",
+            "detail": "Response contains JSON format error text from framework",
+        })
+
+    # Action loop — more than 2 delegate calls visible in one response
+    delegate_count = len(re.findall(r'"tool_name"\s*:\s*"delegate"', tutor_response))
+    if delegate_count > 2:
+        issues.append({
+            "type": "action_loop",
+            "detail": f"Response contains {delegate_count} delegate calls (possible loop)",
+        })
+
+    return issues
+
+
 def _make_record(
     session_id: str, turn: int, student_input: str,
     tutor_response: str, latency_ms: int, module: str,
+    framework_issues: Optional[list[dict]] = None,
+    stderr: Optional[str] = None,
 ) -> dict:
     return {
         "session_id": session_id,
@@ -468,6 +585,8 @@ def _make_record(
         "latency_ms": latency_ms,
         "module": module,
         "quality_score": None,
+        "framework_issues": framework_issues or None,
+        "stderr": stderr or None,
     }
 
 
@@ -540,7 +659,7 @@ Examples:
     parser.add_argument("--timeout", type=int, default=300, help="Tutor response timeout (seconds)")
     parser.add_argument("--output", type=str, default=None, help="JSONL output path")
     parser.add_argument("--output-dir", type=str, default="sessions", help="Output dir for --all mode")
-    parser.add_argument("--log-level", type=str, default="WARNING")
+    parser.add_argument("--log-level", type=str, default="INFO")
 
     args = parser.parse_args()
 
