@@ -467,8 +467,11 @@ def run_session(
     finally:
         child.logfile_read = None
         _stderr_fh.close()
-        if child.isalive():
-            child.close(force=True)
+        try:
+            if child.isalive():
+                child.close(force=True)
+        except pexpect.exceptions.ExceptionPexpect:
+            logger.warning("Could not cleanly terminate tutor process")
 
     # ── Capture exit status ──────────────────────────────────────────────
     exit_code = child.exitstatus      # None if killed by signal
