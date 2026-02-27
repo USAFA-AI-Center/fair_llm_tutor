@@ -1,0 +1,611 @@
+"""
+Single long-lived session runner for autonomous student simulation.
+
+This is the main entry point. One `python` call does everything:
+  1. Starts the tutor via pexpect
+  2. Generates student responses turn-by-turn using an LLM
+  3. Sends them to the tutor and captures responses
+  4. Logs every interaction to JSONL
+  5. Prints a summary when done
+
+Usage:
+    # Single scenario with LLM-driven student
+    python -m student_mode.session_runner \
+        --topic calculus \
+        --problem "Find the derivative of f(x) = 3x^2 + 2x - 5" \
+        --student-llm openai \
+        --course_materials course_materials
+
+    # Single scenario with deterministic student (no LLM needed)
+    python -m student_mode.session_runner \
+        --topic calculus \
+        --problem "Find the derivative of f(x) = 3x^2 + 2x - 5" \
+        --initial-work "I think the derivative is 6x + 2 - 5"
+
+    # Run all built-in scenarios
+    python -m student_mode.session_runner --all
+
+The script runs to completion autonomously. Claude Code (or any caller)
+launches it once and reads the JSONL output when it finishes.
+"""
+
+import argparse
+import json
+import logging
+import os
+import sys
+import time
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+import pexpect
+
+from student_mode.persona import STUDENT_PERSONA, AUTONOMOUS_SESSION_CONFIG
+
+logger = logging.getLogger(__name__)
+
+# ─── pexpect patterns for main.py ───────────────────────────────────────────
+
+TUTOR_PROMPT = r"\nYou: "
+TUTOR_RESPONSE_END = r"-{60}"
+TOPIC_SET_PATTERN = r"Topic set to:"
+PROBLEM_SET_PATTERN = r"Problem set:"
+WELCOME_END = r"\*{30}"
+
+
+# ─── Student LLM response generation ────────────────────────────────────────
+
+def _build_student_llm(provider: str, model: Optional[str] = None):
+    """
+    Build an LLM adapter for generating student responses.
+
+    This uses fairlib's MAL adapters — the same public API the framework
+    exposes. The student LLM is separate from the tutor's LLM.
+
+    Args:
+        provider: "openai", "anthropic", or "ollama"
+        model: Optional model name override
+
+    Returns:
+        An AbstractChatModel instance
+    """
+    if provider == "openai":
+        from fairlib import OpenAIAdapter
+        return OpenAIAdapter(model=model or "gpt-4o-mini")
+    elif provider == "anthropic":
+        from fairlib import AnthropicAdapter
+        return AnthropicAdapter(model=model or "claude-sonnet-4-20250514")
+    elif provider == "ollama":
+        from fairlib import OllamaAdapter
+        return OllamaAdapter(model=model or "llama3:8b")
+    else:
+        raise ValueError(f"Unknown student LLM provider: {provider}")
+
+
+def generate_student_response_llm(
+    llm,
+    tutor_response: str,
+    problem: str,
+    history: list[dict],
+    initial_work: str = "",
+) -> str:
+    """
+    Use an LLM to generate a student response in character.
+
+    Args:
+        llm: A fairlib AbstractChatModel
+        tutor_response: The tutor's last message
+        problem: The current problem statement
+        history: All interaction records so far
+        initial_work: Initial work for the first turn
+
+    Returns:
+        Student's next message
+    """
+    from fairlib import Message
+
+    # Count actual student work turns (not setup commands)
+    work_turns = [
+        r for r in history
+        if not r["student_input"].startswith(("topic ", "problem "))
+        and r["student_input"] not in ("quit", "exit", "q")
+    ]
+
+    # First work turn: submit initial work if provided
+    if len(work_turns) == 0 and initial_work:
+        return initial_work
+
+    # Build conversation context for the LLM
+    conversation_summary = ""
+    for r in work_turns[-6:]:  # Last 6 exchanges for context
+        conversation_summary += f"Student: {r['student_input']}\n"
+        conversation_summary += f"Tutor: {r['tutor_response']}\n\n"
+
+    prompt = (
+        f"{STUDENT_PERSONA}\n\n"
+        f"You are working on this problem: {problem}\n\n"
+        f"Recent conversation:\n{conversation_summary}"
+        f"The tutor just said: {tutor_response}\n\n"
+        f"Respond as the student. Keep it short (1-4 sentences). "
+        f"Show your reasoning. Stay in character."
+    )
+
+    messages = [Message(role="user", content=prompt)]
+    response = llm.invoke(messages)
+    return response.content.strip()
+
+
+def generate_student_response_deterministic(
+    tutor_response: str,
+    problem: str,
+    history: list[dict],
+    initial_work: str = "",
+) -> str:
+    """
+    Generate a student response without an LLM (deterministic fallback).
+
+    Uses canned responses for testing when no LLM is available.
+    """
+    import random
+
+    work_turns = [
+        r for r in history
+        if not r["student_input"].startswith(("topic ", "problem "))
+        and r["student_input"] not in ("quit", "exit", "q")
+    ]
+
+    if len(work_turns) == 0 and initial_work:
+        return initial_work
+
+    # 25% chance of concept question
+    if random.random() < AUTONOMOUS_SESSION_CONFIG["concept_question_probability"]:
+        return random.choice([
+            "Can you explain what that means in simpler terms?",
+            "I don't understand that concept. What does that mean?",
+            "Why does that work that way?",
+            "How is this different from what I was doing?",
+            "What should I focus on to understand this better?",
+        ])
+
+    return random.choice([
+        "Let me try again. I think I see what you mean.",
+        "Oh, I think I made an error. Let me reconsider.",
+        "So if I apply what you said, would the answer change?",
+        "I tried it differently but I'm getting stuck at the same step.",
+        "I think I understand now. Let me rework this.",
+        "Wait, I'm not sure I followed that hint. Can you give me another?",
+    ])
+
+
+# ─── Built-in scenarios ─────────────────────────────────────────────────────
+
+SCENARIOS = {
+    "derivatives": {
+        "topic": "calculus",
+        "problem": "Find the derivative of f(x) = 3x^2 + 2x - 5",
+        "initial_work": "I think the derivative is 6x + 2 - 5",
+        "module": "lesson_01_derivatives",
+    },
+    "recursion": {
+        "topic": "programming",
+        "problem": "Write a Python function that returns the factorial of n",
+        "initial_work": "def factorial(n): return n * factorial(n)",
+        "module": "lesson_02_recursion",
+    },
+    "matrices": {
+        "topic": "linear algebra",
+        "problem": "Multiply the matrices A=[[1,2],[3,4]] and B=[[5,6],[7,8]]",
+        "initial_work": "I multiplied element-wise and got [[5,12],[21,32]]",
+        "module": "lesson_03_matrices",
+    },
+    "statistics": {
+        "topic": "statistics",
+        "problem": "Calculate the standard deviation of [2, 4, 4, 4, 5, 5, 7, 9]",
+        "initial_work": "I added them up and divided by 8, so the standard deviation is 5",
+        "module": "lesson_04_statistics",
+    },
+    "ml_basics": {
+        "topic": "machine learning",
+        "problem": "Explain the difference between supervised and unsupervised learning",
+        "initial_work": "What's the difference between supervised and unsupervised learning?",
+        "module": "lesson_05_ml_basics",
+    },
+}
+
+
+# ─── Core session runner ────────────────────────────────────────────────────
+
+def run_session(
+    topic: str,
+    problem: str,
+    initial_work: str = "",
+    module: str = "",
+    course_materials: str = "course_materials",
+    tutor_config: Optional[str] = None,
+    output_path: Optional[str] = None,
+    student_llm_provider: Optional[str] = None,
+    student_llm_model: Optional[str] = None,
+    max_turns: int = 15,
+    min_turns: int = 5,
+    timeout: int = 300,
+    log_level: str = "WARNING",
+) -> dict:
+    """
+    Run a complete autonomous tutoring session from start to finish.
+
+    This is the single entry point. It:
+      1. Spawns main.py via pexpect
+      2. Sets topic and problem
+      3. Generates student responses (LLM or deterministic)
+      4. Captures tutor responses with timing
+      5. Writes JSONL log
+      6. Returns a summary
+
+    Args:
+        topic: Subject topic to set
+        problem: Problem statement
+        initial_work: Student's first attempt (with a realistic mistake)
+        module: Curriculum module label
+        course_materials: Path to course materials for the tutor
+        tutor_config: Optional path to tutor YAML config
+        output_path: Where to write JSONL (auto-generated if None)
+        student_llm_provider: "openai", "anthropic", "ollama", or None for deterministic
+        student_llm_model: Model name override for student LLM
+        max_turns: Maximum student work turns
+        min_turns: Minimum turns before the session can end
+        timeout: Seconds to wait for tutor responses
+        log_level: Log level for the tutor process
+
+    Returns:
+        Summary dict with session_id, output_path, turn count, and records
+    """
+    session_id = uuid.uuid4().hex[:12]
+
+    # Set up output path
+    if output_path is None:
+        sessions_dir = Path("sessions")
+        sessions_dir.mkdir(exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = str(sessions_dir / f"session_{ts}_{session_id}.jsonl")
+
+    # Build student LLM if requested
+    student_llm = None
+    if student_llm_provider:
+        logger.info(f"Initializing student LLM: {student_llm_provider}/{student_llm_model}")
+        student_llm = _build_student_llm(student_llm_provider, student_llm_model)
+
+    # Build the tutor command
+    cmd = f"python main.py --course_materials {course_materials} --log-level {log_level}"
+    if tutor_config:
+        cmd += f" --config {tutor_config}"
+
+    project_dir = str(Path(__file__).resolve().parent.parent)
+    records = []
+    turn = 0
+
+    print(f"[session {session_id}] Starting tutor: {cmd}")
+    print(f"[session {session_id}] Output: {output_path}")
+    print(f"[session {session_id}] Student: {'LLM (' + student_llm_provider + ')' if student_llm else 'deterministic'}")
+    print(f"[session {session_id}] Turns: {min_turns}-{max_turns}")
+    print()
+
+    # ── Spawn the tutor process ──────────────────────────────────────────
+    child = pexpect.spawn(cmd, encoding="utf-8", timeout=timeout, cwd=project_dir)
+
+    try:
+        # Wait for welcome banner
+        child.expect(WELCOME_END)
+        child.expect(TUTOR_PROMPT)
+        print(f"[session {session_id}] Tutor started, welcome banner received")
+
+        # ── Set topic ────────────────────────────────────────────────────
+        turn += 1
+        child.sendline(f"topic {topic}")
+        child.expect(TOPIC_SET_PATTERN)
+        child.expect(TUTOR_PROMPT)
+        record = _make_record(session_id, turn, f"topic {topic}", f"Topic set to: {topic}", 0, module)
+        records.append(record)
+        _write_record(output_path, record)
+        print(f"  [turn {turn}] Set topic: {topic}")
+
+        # ── Set problem ──────────────────────────────────────────────────
+        turn += 1
+        child.sendline(f"problem {problem}")
+        child.expect(PROBLEM_SET_PATTERN)
+        child.expect(TUTOR_PROMPT)
+        record = _make_record(session_id, turn, f"problem {problem}", "Problem set. Now submit your work!", 0, module)
+        records.append(record)
+        _write_record(output_path, record)
+        print(f"  [turn {turn}] Set problem: {problem[:60]}...")
+
+        # ── Conversation loop ────────────────────────────────────────────
+        student_turns = 0
+        last_tutor_response = "Now submit your work!"
+
+        while student_turns < max_turns:
+            # Generate the student's next response
+            if student_llm:
+                student_input = generate_student_response_llm(
+                    llm=student_llm,
+                    tutor_response=last_tutor_response,
+                    problem=problem,
+                    history=records,
+                    initial_work=initial_work,
+                )
+            else:
+                student_input = generate_student_response_deterministic(
+                    tutor_response=last_tutor_response,
+                    problem=problem,
+                    history=records,
+                    initial_work=initial_work,
+                )
+
+            # Send to tutor and capture response
+            turn += 1
+            timestamp = datetime.now(timezone.utc).isoformat()
+            start_time = time.monotonic()
+
+            child.sendline(student_input)
+
+            # Check if tutor asks to set a problem first
+            idx = child.expect([TUTOR_RESPONSE_END, r"Please set a problem first", TUTOR_PROMPT])
+
+            if idx == 0:
+                # Normal tutor response — capture between the two dash lines
+                raw_before = child.before
+                child.expect(TUTOR_RESPONSE_END)
+                tutor_response = child.before.strip()
+                # Clean up: remove "TUTOR RESPONSE" header if present
+                if "TUTOR RESPONSE" in tutor_response:
+                    tutor_response = tutor_response.split("TUTOR RESPONSE")[-1].strip()
+                child.expect(TUTOR_PROMPT)
+            elif idx == 1:
+                tutor_response = "Please set a problem first."
+                child.expect(TUTOR_PROMPT)
+            else:
+                tutor_response = child.before.strip()
+
+            end_time = time.monotonic()
+            latency_ms = int((end_time - start_time) * 1000)
+
+            record = _make_record(session_id, turn, student_input, tutor_response, latency_ms, module)
+            records.append(record)
+            _write_record(output_path, record)
+
+            last_tutor_response = tutor_response
+            student_turns += 1
+
+            print(f"  [turn {turn}] Student: {student_input[:80]}...")
+            print(f"           Tutor: {tutor_response[:80]}...")
+            print(f"           Latency: {latency_ms}ms")
+
+            # Check if we should stop (after min_turns)
+            if student_turns >= min_turns:
+                # LLM mode: let the LLM decide when the student is satisfied
+                # Deterministic mode: stop at max_turns
+                if not student_llm and student_turns >= max_turns:
+                    break
+                # In LLM mode, stop if the student seems satisfied or max hit
+                if student_llm and student_turns >= max_turns:
+                    break
+
+        # ── End session ──────────────────────────────────────────────────
+        turn += 1
+        child.sendline("quit")
+        child.expect(pexpect.EOF, timeout=30)
+        record = _make_record(session_id, turn, "quit", "[session ended]", 0, module)
+        records.append(record)
+        _write_record(output_path, record)
+
+    except pexpect.exceptions.TIMEOUT as e:
+        logger.error(f"Tutor timed out after {timeout}s: {e}")
+        print(f"\n[session {session_id}] ERROR: Tutor timed out")
+    except pexpect.exceptions.EOF as e:
+        logger.error(f"Tutor process exited unexpectedly: {e}")
+        print(f"\n[session {session_id}] ERROR: Tutor process exited")
+    finally:
+        if child.isalive():
+            child.close(force=True)
+
+    # ── Print summary ────────────────────────────────────────────────────
+    work_records = [
+        r for r in records
+        if not r["student_input"].startswith(("topic ", "problem "))
+        and r["student_input"] not in ("quit", "exit", "q")
+    ]
+    total_latency = sum(r["latency_ms"] for r in work_records)
+    avg_latency = total_latency // len(work_records) if work_records else 0
+
+    summary = {
+        "session_id": session_id,
+        "output_path": output_path,
+        "topic": topic,
+        "problem": problem,
+        "total_turns": len(records),
+        "work_turns": len(work_records),
+        "total_latency_ms": total_latency,
+        "avg_latency_ms": avg_latency,
+        "student_mode": student_llm_provider or "deterministic",
+    }
+
+    print(f"\n{'=' * 60}")
+    print(f"SESSION SUMMARY")
+    print(f"{'=' * 60}")
+    print(f"  Session ID:     {session_id}")
+    print(f"  JSONL output:   {output_path}")
+    print(f"  Work turns:     {len(work_records)}")
+    print(f"  Avg latency:    {avg_latency}ms")
+    print(f"  Student mode:   {summary['student_mode']}")
+    print(f"{'=' * 60}")
+
+    return summary
+
+
+def _make_record(
+    session_id: str, turn: int, student_input: str,
+    tutor_response: str, latency_ms: int, module: str,
+) -> dict:
+    return {
+        "session_id": session_id,
+        "turn": turn,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "student_input": student_input,
+        "tutor_response": tutor_response,
+        "latency_ms": latency_ms,
+        "module": module,
+        "quality_score": None,
+    }
+
+
+def _write_record(output_path: str, record: dict) -> None:
+    with open(output_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record) + "\n")
+
+
+# ─── CLI ─────────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Run an autonomous simulated student session against the FAIR-LLM tutor",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # LLM-driven student (uses OpenAI to generate student responses)
+  python -m student_mode.session_runner \\
+      --topic calculus \\
+      --problem "Find the derivative of 3x^2 + 2x - 5" \\
+      --initial-work "I think it's 6x + 2 - 5" \\
+      --student-llm openai
+
+  # Deterministic student (no LLM needed, canned responses)
+  python -m student_mode.session_runner \\
+      --topic programming \\
+      --problem "Write factorial in Python" \\
+      --initial-work "def factorial(n): return n * factorial(n)"
+
+  # Run all built-in scenarios
+  python -m student_mode.session_runner --all
+
+  # Run a specific built-in scenario
+  python -m student_mode.session_runner --scenario derivatives
+        """,
+    )
+
+    # Scenario selection
+    scenario_group = parser.add_mutually_exclusive_group()
+    scenario_group.add_argument(
+        "--scenario", type=str, choices=list(SCENARIOS.keys()),
+        help="Run a built-in scenario by name",
+    )
+    scenario_group.add_argument(
+        "--all", action="store_true",
+        help="Run all built-in scenarios sequentially",
+    )
+
+    # Custom scenario
+    parser.add_argument("--topic", type=str, help="Subject topic")
+    parser.add_argument("--problem", type=str, help="Problem statement")
+    parser.add_argument("--initial-work", type=str, default="", help="Student's first attempt")
+    parser.add_argument("--module", type=str, default="", help="Curriculum module label")
+
+    # Tutor config
+    parser.add_argument("--course_materials", type=str, default="course_materials")
+    parser.add_argument("--tutor-config", type=str, default=None, help="Tutor YAML config")
+
+    # Student LLM
+    parser.add_argument(
+        "--student-llm", type=str, default=None,
+        choices=["openai", "anthropic", "ollama"],
+        help="LLM provider for student responses (omit for deterministic)",
+    )
+    parser.add_argument("--student-model", type=str, default=None, help="Student LLM model name")
+
+    # Session params
+    parser.add_argument("--max-turns", type=int, default=AUTONOMOUS_SESSION_CONFIG["max_turns"])
+    parser.add_argument("--min-turns", type=int, default=AUTONOMOUS_SESSION_CONFIG["min_turns"])
+    parser.add_argument("--timeout", type=int, default=300, help="Tutor response timeout (seconds)")
+    parser.add_argument("--output", type=str, default=None, help="JSONL output path")
+    parser.add_argument("--output-dir", type=str, default="sessions", help="Output dir for --all mode")
+    parser.add_argument("--log-level", type=str, default="WARNING")
+
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=getattr(logging, args.log_level.upper(), logging.WARNING),
+        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    )
+
+    if args.all:
+        # Run all built-in scenarios
+        Path(args.output_dir).mkdir(exist_ok=True)
+        all_summaries = []
+
+        for name, scenario in SCENARIOS.items():
+            print(f"\n{'#' * 60}")
+            print(f"# Scenario: {name}")
+            print(f"{'#' * 60}\n")
+
+            output_path = str(Path(args.output_dir) / f"{scenario['module']}.jsonl")
+            try:
+                summary = run_session(
+                    topic=scenario["topic"],
+                    problem=scenario["problem"],
+                    initial_work=scenario.get("initial_work", ""),
+                    module=scenario.get("module", ""),
+                    course_materials=args.course_materials,
+                    tutor_config=args.tutor_config,
+                    output_path=output_path,
+                    student_llm_provider=args.student_llm,
+                    student_llm_model=args.student_model,
+                    max_turns=args.max_turns,
+                    min_turns=args.min_turns,
+                    timeout=args.timeout,
+                    log_level=args.log_level,
+                )
+                all_summaries.append(summary)
+            except Exception as e:
+                logger.error(f"Scenario {name} failed: {e}")
+                all_summaries.append({"scenario": name, "status": f"error: {e}"})
+
+        print(f"\n{'=' * 60}")
+        print(f"ALL SCENARIOS COMPLETE: {len(all_summaries)} sessions")
+        print(json.dumps(all_summaries, indent=2))
+        return
+
+    # Single scenario
+    if args.scenario:
+        s = SCENARIOS[args.scenario]
+        topic = s["topic"]
+        problem = s["problem"]
+        initial_work = s.get("initial_work", "")
+        module = s.get("module", "")
+    elif args.topic and args.problem:
+        topic = args.topic
+        problem = args.problem
+        initial_work = args.initial_work
+        module = args.module
+    else:
+        parser.error("Provide --topic and --problem, or --scenario, or --all")
+        return
+
+    run_session(
+        topic=topic,
+        problem=problem,
+        initial_work=initial_work,
+        module=module,
+        course_materials=args.course_materials,
+        tutor_config=args.tutor_config,
+        output_path=args.output,
+        student_llm_provider=args.student_llm,
+        student_llm_model=args.student_model,
+        max_turns=args.max_turns,
+        min_turns=args.min_turns,
+        timeout=args.timeout,
+        log_level=args.log_level,
+    )
+
+
+if __name__ == "__main__":
+    main()

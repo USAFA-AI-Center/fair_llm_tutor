@@ -1,73 +1,42 @@
-You are launching an autonomous simulated student session against the FAIR-LLM tutor.
+Run an autonomous simulated student session against the FAIR-LLM tutor.
 
-## Your Role
+## What to do
 
-You are a **simulated student** interacting with the tutor via its CLI. You must follow the student persona defined in `student_mode/persona.py` exactly. You are an intermediate CS student who knows Python but is new to AI/ML.
+Run the session runner script as a single long-lived process. It handles everything: starting the tutor, generating student responses, capturing tutor responses, and logging to JSONL.
 
-## Constraints — READ CAREFULLY
+Parse the user's arguments from: `$ARGUMENTS`
 
-- You ONLY interact with the tutor through `student_mode/logging_wrapper.py` — NEVER read, modify, or inspect tutor internals (`agents/`, `tools/`, `main.py` source, config)
-- You NEVER bypass the tutoring framework — no looking up answers, no reading course materials directly, no importing fairlib
-- You stay in character for the entire session — do not break the fourth wall
-- You do NOT use vocabulary or concepts beyond what the student persona would know
+**If arguments are empty**, run a default scenario:
+```bash
+cd ~/fair_llm_tutor && python -m student_mode.session_runner --scenario derivatives --student-llm openai
+```
 
-## Session Procedure
+**If the user provides a built-in scenario name** (derivatives, recursion, matrices, statistics, ml_basics):
+```bash
+cd ~/fair_llm_tutor && python -m student_mode.session_runner --scenario <name> --student-llm openai
+```
 
-1. **Start the logging wrapper** by running:
-   ```bash
-   cd ~/fair_llm_tutor
-   ```
+**If the user provides a topic and problem**:
+```bash
+cd ~/fair_llm_tutor && python -m student_mode.session_runner --topic "<topic>" --problem "<problem>" --initial-work "<work>" --student-llm openai
+```
 
-2. **Use the TutorSessionLogger** to drive the session. Run this Python script, filling in the topic and problem from the user's arguments (or use defaults):
+**If the user says "all"**:
+```bash
+cd ~/fair_llm_tutor && python -m student_mode.session_runner --all --student-llm openai
+```
 
-   ```python
-   import sys
-   sys.path.insert(0, '.')
-   from student_mode.logging_wrapper import TutorSessionLogger
-   from student_mode.persona import AUTONOMOUS_SESSION_CONFIG
-   ```
+**If the user says "deterministic" or "no llm"**, drop the `--student-llm` flag to use canned responses instead of LLM-generated ones.
 
-3. **Start the session** with `TutorSessionLogger` as a context manager.
+## After the script finishes
 
-4. **Send interactions** using `send_and_capture()`:
-   - First: `topic <topic>` to set the topic
-   - Then: `problem <problem>` to set the problem
-   - Then: Generate student responses based on the persona
+1. Read the JSONL output file it created (the path is printed in the summary)
+2. Summarize the session: how many turns, average latency, any notable moments
+3. If the user wants quality scoring, read the JSONL and assess each tutor response for safety, pedagogy, helpfulness, and domain accuracy
 
-5. **Generate responses** as the student:
-   - On the first work turn, submit an initial attempt WITH a realistic mistake
-   - On subsequent turns, respond to the tutor's hints — sometimes correctly (70%), sometimes with a new misunderstanding (30%)
-   - Occasionally ask concept questions (~25% of turns)
-   - Keep responses short (1-4 sentences)
-   - Show your reasoning, not just answers
+## Important constraints
 
-6. **Run for 5-15 turns** then send `quit`
-
-7. **Report results**: After the session ends, summarize:
-   - Total turns
-   - Path to the JSONL log file
-   - Key moments (where the student struggled, where hints helped)
-
-## Arguments
-
-The user may provide: `$ARGUMENTS`
-
-If arguments are empty, use this default scenario:
-- Topic: calculus
-- Problem: Find the derivative of f(x) = 3x^2 + 2x - 5
-
-If the user provides arguments, parse them as:
-- First argument: topic
-- Remaining arguments: problem statement
-
-## Example
-
-User runs: `/student-session calculus Find the integral of 2x + 3`
-
-You would:
-1. Start the logging wrapper
-2. Set topic to "calculus"
-3. Set problem to "Find the integral of 2x + 3"
-4. Submit initial work like "I think the integral is x^2 + 3" (missing the constant)
-5. Interact with the tutor for 5-15 turns
-6. Report the results
+- Run the script from `~/fair_llm_tutor` (it needs to find `main.py`)
+- Do NOT read or modify tutor source code (`agents/`, `tools/`, `main.py`)
+- Do NOT interact with the tutor in any way other than through `session_runner.py`
+- The script's output timeout is 300s by default — use `--timeout` to increase for slow models
