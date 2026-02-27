@@ -386,7 +386,11 @@ def run_session(
             timestamp = datetime.now(timezone.utc).isoformat()
             start_time = time.monotonic()
 
-            child.sendline(student_input)
+            # Collapse newlines to spaces — input() splits on \n, causing
+            # multi-line student messages (e.g. code blocks) to be read as
+            # separate inputs, leaving subsequent turns with empty responses.
+            safe_input = student_input.replace('\n', ' ').replace('\r', '')
+            child.sendline(safe_input)
 
             # main.py prints tutor responses in this format:
             #   \n------------------------------------------------------------
