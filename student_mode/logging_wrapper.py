@@ -136,12 +136,13 @@ class TutorSessionLogger:
             self._child.expect(pexpect.EOF, timeout=30)
             response_text = "[session ended]"
         else:
-            # Normal student work — expect the tutor response block
-            self._child.expect(TUTOR_RESPONSE_END)
-            # Capture the response between the dashes
-            raw = self._child.before
-            # The response comes after "TUTOR RESPONSE\n---...---\n"
-            self._child.expect(TUTOR_RESPONSE_END)
+            # Normal student work — main.py prints:
+            #   \n---...\nTUTOR RESPONSE\n---...\n\n{response}\n\n---...
+            # Skip 1st dash line, skip "TUTOR RESPONSE" + 2nd dash line,
+            # then capture everything before the 3rd dash line.
+            self._child.expect(TUTOR_RESPONSE_END)  # 1st dash line
+            self._child.expect(TUTOR_RESPONSE_END)  # 2nd dash line
+            self._child.expect(TUTOR_RESPONSE_END)  # 3rd dash line
             response_text = self._child.before.strip()
             # Wait for next prompt
             self._child.expect(TUTOR_PROMPT)

@@ -41,6 +41,10 @@ from pathlib import Path
 from typing import Optional
 
 import pexpect
+from dotenv import load_dotenv
+
+# Load .env from project root (for ANTHROPIC_API_KEY, etc.)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from student_mode.persona import STUDENT_PERSONA, AUTONOMOUS_SESSION_CONFIG
 
@@ -76,7 +80,7 @@ def _build_student_llm(provider: str, model: Optional[str] = None):
         return OpenAIAdapter(model=model or "gpt-4o-mini")
     elif provider == "anthropic":
         from fairlib import AnthropicAdapter
-        return AnthropicAdapter(model=model or "claude-sonnet-4-20250514")
+        return AnthropicAdapter(model_name=model or "claude-sonnet-4-20250514")
     elif provider == "ollama":
         from fairlib import OllamaAdapter
         return OllamaAdapter(model=model or "llama3:8b")
@@ -349,17 +353,25 @@ def run_session(
 
             child.sendline(student_input)
 
-            # Check if tutor asks to set a problem first
+            # main.py prints tutor responses in this format:
+            #   \n------------------------------------------------------------
+            #   TUTOR RESPONSE
+            #   ------------------------------------------------------------
+            #   \n{actual response}\n
+            #   ------------------------------------------------------------
+            #
+            # We need to skip the first two dash lines (header), then capture
+            # everything between the 2nd and 3rd dash lines.
+
             idx = child.expect([TUTOR_RESPONSE_END, r"Please set a problem first", TUTOR_PROMPT])
 
             if idx == 0:
-                # Normal tutor response — capture between the two dash lines
-                raw_before = child.before
+                # Matched 1st dash line. Now skip "TUTOR RESPONSE" + 2nd dash line.
+                child.expect(TUTOR_RESPONSE_END)
+                # Now wait for the 3rd dash line — everything before it is the response.
                 child.expect(TUTOR_RESPONSE_END)
                 tutor_response = child.before.strip()
-                # Clean up: remove "TUTOR RESPONSE" header if present
-                if "TUTOR RESPONSE" in tutor_response:
-                    tutor_response = tutor_response.split("TUTOR RESPONSE")[-1].strip()
+                # Wait for next "You: " prompt
                 child.expect(TUTOR_PROMPT)
             elif idx == 1:
                 tutor_response = "Please set a problem first."
