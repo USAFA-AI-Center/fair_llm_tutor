@@ -1,4 +1,5 @@
 # manager_agent.py
+# TODO:: use new delegation example classes added to prompts.py
 
 import re
 

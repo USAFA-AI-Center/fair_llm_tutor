@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file=\"$CLAUDE_FILE_PATH\"; if [ -n \"$file\" ] && echo \"$file\" | grep -qE '\\.py$'; then python -m py_compile \"$file\" 2>&1; fi",
+            "timeout": 10000
+          }
+        ]
+      }
+    ]
+  }
+}
