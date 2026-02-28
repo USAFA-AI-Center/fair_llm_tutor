@@ -2,6 +2,7 @@
 
 import os
 import sys
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -101,6 +102,48 @@ class TestTutorConfigFromEnv:
 
         config = TutorConfig.from_env()
         assert config.model_name == "Qwen/Qwen2.5-14B-Instruct"
+
+
+class TestTutorConfigFromYaml:
+    """Tests for YAML file loading."""
+
+    def test_loads_from_yaml(self, tmp_path):
+        yaml_file = tmp_path / "config.yaml"
+        yaml_file.write_text(textwrap.dedent("""\
+            model_name: "test-yaml-model"
+            max_new_tokens: 2000
+            rag_top_k: 5
+        """))
+        config = TutorConfig.from_yaml(str(yaml_file))
+        assert config.model_name == "test-yaml-model"
+        assert config.max_new_tokens == 2000
+        assert config.rag_top_k == 5
+
+    def test_missing_file_raises(self):
+        with pytest.raises(FileNotFoundError):
+            TutorConfig.from_yaml("/nonexistent/path.yaml")
+
+    def test_env_overrides_yaml(self, tmp_path, monkeypatch):
+        yaml_file = tmp_path / "config.yaml"
+        yaml_file.write_text(textwrap.dedent("""\
+            model_name: "yaml-model"
+            max_new_tokens: 500
+        """))
+        monkeypatch.setenv("FAIR_LLM_MODEL_NAME", "env-model")
+        config = TutorConfig.from_yaml(str(yaml_file))
+        assert config.model_name == "env-model"
+        # Non-overridden value comes from YAML
+        assert config.max_new_tokens == 500
+
+    def test_unknown_yaml_keys_ignored(self, tmp_path):
+        yaml_file = tmp_path / "config.yaml"
+        yaml_file.write_text(textwrap.dedent("""\
+            model_name: "test-model"
+            unknown_key: "should be ignored"
+        """))
+        config = TutorConfig.from_yaml(str(yaml_file))
+        assert config.model_name == "test-model"
+        assert not hasattr(config, "unknown_key")
 
 
 class TestTutorConfigCustomValues:

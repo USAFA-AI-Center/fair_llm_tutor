@@ -2,14 +2,10 @@
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, Mock
-
 import pytest
 
 # Add project root to path so we can import tutor modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
-# Add fair_prompt_optimizer to path for integration tests
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "fair_prompt_optimizer"))
 
 
 class MockMessage:
@@ -73,18 +69,6 @@ def mock_retriever_with_docs():
     ])
 
 
-def build_tool_input(**fields):
-    """Build a |||−delimited tool input string from keyword arguments.
-
-    DEPRECATED: Use build_json_input() for new code.
-
-    Example:
-        build_tool_input(PROBLEM="Find x", STUDENT_WORK="x=5", TOPIC="algebra")
-        # Returns: "PROBLEM: Find x ||| STUDENT_WORK: x=5 ||| TOPIC: algebra"
-    """
-    return " ||| ".join(f"{key}: {value}" for key, value in fields.items())
-
-
 def build_json_input(model_class, **fields):
     """Build a JSON tool input string from a Pydantic model.
 
@@ -95,32 +79,3 @@ def build_json_input(model_class, **fields):
     return model_class(**fields).model_dump_json()
 
 
-def build_tutor_runner(mock_llm=None, mock_retriever=None):
-    """Build a full HierarchicalAgentRunner with the tutor's real agents.
-
-    Uses mock LLM/retriever so no actual inference is needed — only the
-    agent structure, prompts, and tool registries matter for config tests.
-    """
-    from fairlib import WorkingMemory, HierarchicalAgentRunner
-
-    # Import tutor agent classes (relative to fair_llm_tutor project root)
-    from agents.safety_guard_agent import SafetyGuardAgent
-    from agents.misconception_detector_agent import MisconceptionDetectorAgent
-    from agents.hint_generator_agent import HintGeneratorAgent
-    from agents.manager_agent import TutorManagerAgent
-
-    llm = mock_llm or MockLLM()
-    retriever = mock_retriever or MockRetriever()
-
-    workers = {
-        "SafetyGuard": SafetyGuardAgent.create(llm, WorkingMemory()),
-        "MisconceptionDetector": MisconceptionDetectorAgent.create(
-            llm, WorkingMemory(), retriever
-        ),
-        "HintGenerator": HintGeneratorAgent.create(
-            llm, WorkingMemory(), retriever
-        ),
-    }
-
-    manager = TutorManagerAgent.create(llm, WorkingMemory(), workers)
-    return HierarchicalAgentRunner(manager, workers, max_steps=15)

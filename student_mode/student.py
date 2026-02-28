@@ -27,13 +27,13 @@ def build_student_llm(provider: str, model: Optional[str] = None):
     """
     if provider == "openai":
         from fairlib import OpenAIAdapter
-        return OpenAIAdapter(model=model or "gpt-4o-mini")
+        return OpenAIAdapter(model_name=model or "gpt-4o-mini")
     elif provider == "anthropic":
         from fairlib import AnthropicAdapter
         return AnthropicAdapter(model_name=model or "claude-sonnet-4-20250514")
     elif provider == "ollama":
         from fairlib import OllamaAdapter
-        return OllamaAdapter(model=model or "llama3:8b")
+        return OllamaAdapter(model_name=model or "llama3:8b")
     else:
         raise ValueError(f"Unknown student LLM provider: {provider}")
 

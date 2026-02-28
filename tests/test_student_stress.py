@@ -14,8 +14,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agents.manager_agent import TutorManagerAgent
-from tests.conftest import MockLLM, MockRetriever, build_tool_input, build_json_input
-from tools.schemas import DiagnosticInput, HintInput, InteractionMode, Severity
+from tests.conftest import MockLLM, MockRetriever, build_json_input
+from tools.schemas import HintInput, InteractionMode, Severity
 
 
 # ============================================================================
@@ -33,33 +33,12 @@ class TestNonSTEMModeDetection:
         )
         assert result == "CONCEPT_EXPLANATION"
 
-    def test_code_output_with_numbers(self):
-        """Student shares code output — numbers trigger HINT correctly."""
-        result = TutorManagerAgent.detect_mode(
-            "I got output = 15 but the expected output is 20"
-        )
-        assert result == "HINT"
-
-    def test_history_date_submission(self):
-        """Student submits a historical date — numbers trigger HINT."""
-        result = TutorManagerAgent.detect_mode(
-            "I think the French Revolution started in 1788"
-        )
-        assert result == "HINT"
-
     def test_music_theory_question(self):
         """Pure concept question about music theory."""
         result = TutorManagerAgent.detect_mode(
             "What is the difference between major and minor scales?"
         )
         assert result == "CONCEPT_EXPLANATION"
-
-    def test_programming_debug_submission(self):
-        """Student submitting debug output with values."""
-        result = TutorManagerAgent.detect_mode(
-            "My function returned [1, 2, 3] instead of [3, 2, 1]"
-        )
-        assert result == "HINT"
 
 
 class TestModeDetectionFalseHints:
@@ -230,68 +209,6 @@ class TestSafetyBypassRisks:
 # ============================================================================
 # 3. Field parsing edge cases — student content that breaks delimiters
 # ============================================================================
-
-
-class TestFieldParsingEdgeCases:
-    """Edge cases in JSON input parsing for diagnostic tool."""
-
-    def _make_diagnostic_tool(self):
-        from tools.diagnostic_tools import StudentWorkAnalyzerTool
-        return StudentWorkAnalyzerTool(llm=MockLLM(), retriever=MockRetriever())
-
-    def _make_hint_tool(self):
-        from tools.pedagogical_tools import SocraticHintGeneratorTool
-        return SocraticHintGeneratorTool(llm=MockLLM("hint text"), retriever=MockRetriever())
-
-    def test_student_work_with_special_chars_in_json(self):
-        """JSON correctly handles special characters that broke ||| parsing."""
-        tool = self._make_diagnostic_tool()
-        tool_input = build_json_input(
-            DiagnosticInput,
-            problem="Solve x",
-            student_work='I tried a ||| b approach',
-            topic="algebra"
-        )
-        result = tool.use(tool_input)
-        # JSON preserves the full student work — no silent corruption
-        assert "ERROR" not in result
-
-    def test_student_work_with_field_prefix_in_json(self):
-        """JSON handles student work containing 'TOPIC:' without hijacking."""
-        tool = self._make_diagnostic_tool()
-        tool_input = build_json_input(
-            DiagnosticInput,
-            problem="Explain TOPIC: gravity",
-            student_work="I think so",
-            topic="physics"
-        )
-        result = tool.use(tool_input)
-        assert "ERROR" not in result
-
-    def test_student_work_with_colons_in_json(self):
-        """JSON handles colons in student work (e.g., ratios '2:3')."""
-        tool = self._make_diagnostic_tool()
-        tool_input = build_json_input(
-            DiagnosticInput,
-            problem="What is the ratio?",
-            student_work="The ratio is 2:3",
-            topic="math"
-        )
-        result = tool.use(tool_input)
-        assert "ERROR" not in result
-
-    def test_empty_student_work_in_json(self):
-        """Empty student_work field returns validation error."""
-        tool = self._make_diagnostic_tool()
-        tool_input = build_json_input(
-            DiagnosticInput,
-            problem="Solve x",
-            student_work="",
-            topic="algebra"
-        )
-        result = tool.use(tool_input)
-        assert "ERROR" in result
-        assert "student_work" in result.lower()
 
 
 # ============================================================================

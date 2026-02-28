@@ -213,3 +213,65 @@ class TestRetrieverIntegration:
         # Verify retriever was called
         assert retriever.last_query is not None
         assert "power rule" in retriever.last_query
+
+
+class TestHintLevelOverride:
+    """hint_level overrides severity-based hint level."""
+
+    def _make_tool(self):
+        return SocraticHintGeneratorTool(llm=MockLLM("Test hint"), retriever=MockRetriever())
+
+    def test_hint_level_overrides_severity(self):
+        """hint_level=4 should produce Level 4 even for Critical severity (default 2)."""
+        tool = self._make_tool()
+        result = tool.use(build_json_input(
+            HintInput,
+            mode=InteractionMode.HINT, problem="Solve 2x=10", student_work="x=3",
+            misconception="division error", severity=Severity.CRITICAL, topic="algebra",
+            hint_level=4
+        ))
+        assert "Level 4" in result
+
+    def test_hint_level_1(self):
+        """hint_level=1 should produce Level 1."""
+        tool = self._make_tool()
+        result = tool.use(build_json_input(
+            HintInput,
+            mode=InteractionMode.HINT, problem="Solve 2x=10", student_work="x=3",
+            misconception="division error", severity=Severity.MAJOR, topic="algebra",
+            hint_level=1
+        ))
+        assert "Level 1" in result
+
+
+class TestFieldValidation:
+    """Field validation for SocraticHintGeneratorTool."""
+
+    def _make_tool(self):
+        return SocraticHintGeneratorTool(llm=MockLLM(), retriever=MockRetriever())
+
+    def test_concept_mode_missing_concept(self):
+        tool = self._make_tool()
+        result = tool.use(build_json_input(
+            HintInput,
+            mode=InteractionMode.CONCEPT_EXPLANATION,
+            concept="",
+            question="What is it?",
+            topic="physics"
+        ))
+        assert "ERROR" in result
+        assert "concept" in result.lower()
+
+    def test_hint_mode_missing_problem(self):
+        tool = self._make_tool()
+        result = tool.use(build_json_input(
+            HintInput,
+            mode=InteractionMode.HINT,
+            problem="",
+            student_work="x=5",
+            misconception="error",
+            severity=Severity.MINOR,
+            topic="algebra"
+        ))
+        assert "ERROR" in result
+        assert "problem" in result.lower()

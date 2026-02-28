@@ -3,5 +3,8 @@ rich>=14.0.0
 chromadb>=0.4.0
 sentence-transformers>=2.2.0
 pyyaml>=6.0.0
+pdfplumber>=0.10.0
+pdf2image>=1.16.0
+pexpect>=4.9.0
 fair-llm @ file:///home/ai-user/fair_llm
 pytest>=8.0.0

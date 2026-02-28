@@ -64,7 +64,6 @@ SCENARIOS: dict[str, Scenario] = {
         correct_answer="Supervised uses labeled data; unsupervised finds patterns in unlabeled data",
         expected_behavior="concept_explanation",
     ),
-    # ── Migrated from eval/scenarios.json ─────────────────────────────────
     "algebra": Scenario(
         topic="math",
         problem="Solve 2x + 3 = 15",
