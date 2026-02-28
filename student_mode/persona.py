@@ -1,12 +1,12 @@
 """
 Fixed student persona for autonomous simulated student sessions.
 
-This persona is used by the Claude Code subagent when interacting with
-the FAIR-LLM tutor. It simulates an intermediate-level student who
-knows Python but is new to AI/ML and agentic systems.
+This persona is used by ``student_mode.student`` when generating
+simulated student responses. It defines an intermediate-level student
+who knows Python but is new to AI/ML and agentic systems.
 """
 
-# The fixed persona prompt injected into the student subagent
+# The fixed persona prompt injected into the student response generator
 STUDENT_PERSONA = """You are a simulated college student interacting with an AI tutor.
 
 BACKGROUND:

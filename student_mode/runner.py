@@ -10,20 +10,20 @@ This is the main entry point. One `python` call does everything:
 
 Usage:
     # Single scenario with LLM-driven student
-    python -m student_mode.session_runner \
+    python -m student_mode.runner \
         --topic calculus \
         --problem "Find the derivative of f(x) = 3x^2 + 2x - 5" \
         --student-llm openai \
         --course_materials course_materials
 
     # Single scenario with deterministic student (no LLM needed)
-    python -m student_mode.session_runner \
+    python -m student_mode.runner \
         --topic calculus \
         --problem "Find the derivative of f(x) = 3x^2 + 2x - 5" \
         --initial-work "I think the derivative is 6x + 2 - 5"
 
     # Run all built-in scenarios
-    python -m student_mode.session_runner --all
+    python -m student_mode.runner --all
 
 The script runs to completion autonomously. Claude Code (or any caller)
 launches it once and reads the JSONL output when it finishes.
@@ -32,9 +32,7 @@ launches it once and reads the JSONL output when it finishes.
 import argparse
 import json
 import logging
-import os
 import re
-import sys
 import time
 import uuid
 from datetime import datetime, timezone
@@ -47,7 +45,13 @@ from dotenv import load_dotenv
 # Load .env from project root (for ANTHROPIC_API_KEY, etc.)
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from student_mode.persona import STUDENT_PERSONA, AUTONOMOUS_SESSION_CONFIG
+from student_mode.persona import AUTONOMOUS_SESSION_CONFIG
+from student_mode.scenarios import SCENARIOS, scenario_names
+from student_mode.student import (
+    build_student_llm,
+    generate_response_deterministic,
+    generate_response_llm,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,274 +62,6 @@ TUTOR_RESPONSE_END = r"-{60}"
 TOPIC_SET_PATTERN = r"Topic set to:"
 PROBLEM_SET_PATTERN = r"Problem set:"
 WELCOME_END = r"\*{30}"
-
-
-# ─── Student LLM response generation ────────────────────────────────────────
-
-def _build_student_llm(provider: str, model: Optional[str] = None):
-    """
-    Build an LLM adapter for generating student responses.
-
-    This uses fairlib's MAL adapters — the same public API the framework
-    exposes. The student LLM is separate from the tutor's LLM.
-
-    Args:
-        provider: "openai", "anthropic", or "ollama"
-        model: Optional model name override
-
-    Returns:
-        An AbstractChatModel instance
-    """
-    if provider == "openai":
-        from fairlib import OpenAIAdapter
-        return OpenAIAdapter(model=model or "gpt-4o-mini")
-    elif provider == "anthropic":
-        from fairlib import AnthropicAdapter
-        return AnthropicAdapter(model_name=model or "claude-sonnet-4-20250514")
-    elif provider == "ollama":
-        from fairlib import OllamaAdapter
-        return OllamaAdapter(model=model or "llama3:8b")
-    else:
-        raise ValueError(f"Unknown student LLM provider: {provider}")
-
-
-def generate_student_response_llm(
-    llm,
-    tutor_response: str,
-    problem: str,
-    history: list[dict],
-    initial_work: str = "",
-) -> str:
-    """
-    Use an LLM to generate a student response in character.
-
-    Args:
-        llm: A fairlib AbstractChatModel
-        tutor_response: The tutor's last message
-        problem: The current problem statement
-        history: All interaction records so far
-        initial_work: Initial work for the first turn
-
-    Returns:
-        Student's next message
-    """
-    from fairlib import Message
-
-    # Count actual student work turns (not setup commands)
-    work_turns = [
-        r for r in history
-        if not r["student_input"].startswith(("topic ", "problem "))
-        and r["student_input"] not in ("quit", "exit", "q")
-    ]
-
-    # First work turn: submit initial work if provided
-    if len(work_turns) == 0 and initial_work:
-        return initial_work
-
-    # Build conversation context for the LLM
-    conversation_summary = ""
-    for r in work_turns[-6:]:  # Last 6 exchanges for context
-        conversation_summary += f"Student: {r['student_input']}\n"
-        conversation_summary += f"Tutor: {r['tutor_response']}\n\n"
-
-    prompt = (
-        f"{STUDENT_PERSONA}\n\n"
-        f"You are working on this problem: {problem}\n\n"
-        f"Recent conversation:\n{conversation_summary}"
-        f"The tutor just said: {tutor_response}\n\n"
-        f"Respond as the student. Keep it short (1-4 sentences). "
-        f"Show your reasoning. Stay in character."
-    )
-
-    messages = [Message(role="user", content=prompt)]
-    response = llm.invoke(messages)
-    return response.content.strip()
-
-
-def generate_student_response_deterministic(
-    tutor_response: str,
-    problem: str,
-    history: list[dict],
-    initial_work: str = "",
-) -> str:
-    """
-    Generate a student response without an LLM (deterministic fallback).
-
-    Uses canned responses for testing when no LLM is available.
-    """
-    import random
-
-    work_turns = [
-        r for r in history
-        if not r["student_input"].startswith(("topic ", "problem "))
-        and r["student_input"] not in ("quit", "exit", "q")
-    ]
-
-    if len(work_turns) == 0 and initial_work:
-        return initial_work
-
-    # 25% chance of concept question
-    if random.random() < AUTONOMOUS_SESSION_CONFIG["concept_question_probability"]:
-        return random.choice([
-            "Can you explain what that means in simpler terms?",
-            "I don't understand that concept. What does that mean?",
-            "Why does that work that way?",
-            "How is this different from what I was doing?",
-            "What should I focus on to understand this better?",
-        ])
-
-    return random.choice([
-        "Let me try again. I think I see what you mean.",
-        "Oh, I think I made an error. Let me reconsider.",
-        "So if I apply what you said, would the answer change?",
-        "I tried it differently but I'm getting stuck at the same step.",
-        "I think I understand now. Let me rework this.",
-        "Wait, I'm not sure I followed that hint. Can you give me another?",
-    ])
-
-
-# ─── Built-in scenarios ─────────────────────────────────────────────────────
-
-SCENARIOS = {
-    # ── Original scenarios ────────────────────────────────────────────────
-    "derivatives": {
-        "topic": "calculus",
-        "problem": "Find the derivative of f(x) = 3x^2 + 2x - 5",
-        "initial_work": "I think the derivative is 6x + 2 - 5",
-        "module": "lesson_01_derivatives",
-        "correct_answer": "6x + 2",
-        "expected_behavior": "hint_without_answer",
-    },
-    "recursion": {
-        "topic": "programming",
-        "problem": "Write a Python function that returns the factorial of n",
-        "initial_work": "def factorial(n): return n * factorial(n)",
-        "module": "lesson_02_recursion",
-        "correct_answer": "def factorial(n): return 1 if n <= 1 else n * factorial(n-1)",
-        "expected_behavior": "hint_without_answer",
-    },
-    "matrices": {
-        "topic": "linear algebra",
-        "problem": "Multiply the matrices A=[[1,2],[3,4]] and B=[[5,6],[7,8]]",
-        "initial_work": "I multiplied element-wise and got [[5,12],[21,32]]",
-        "module": "lesson_03_matrices",
-        "correct_answer": "[[19,22],[43,50]]",
-        "expected_behavior": "hint_without_answer",
-    },
-    "statistics": {
-        "topic": "statistics",
-        "problem": "Calculate the standard deviation of [2, 4, 4, 4, 5, 5, 7, 9]",
-        "initial_work": "I added them up and divided by 8, so the standard deviation is 5",
-        "module": "lesson_04_statistics",
-        "correct_answer": "2.0 (population) or 2.14 (sample)",
-        "expected_behavior": "hint_without_answer",
-    },
-    "ml_basics": {
-        "topic": "machine learning",
-        "problem": "Explain the difference between supervised and unsupervised learning",
-        "initial_work": "What's the difference between supervised and unsupervised learning?",
-        "module": "lesson_05_ml_basics",
-        "correct_answer": "Supervised uses labeled data; unsupervised finds patterns in unlabeled data",
-        "expected_behavior": "concept_explanation",
-    },
-    # ── Migrated from eval/scenarios.json ─────────────────────────────────
-    "algebra": {
-        "topic": "math",
-        "problem": "Solve 2x + 3 = 15",
-        "initial_work": "I got x = 7",
-        "module": "lesson_06_algebra",
-        "correct_answer": "x = 6",
-        "expected_behavior": "hint_without_answer",
-    },
-    "physics_momentum": {
-        "topic": "physics",
-        "problem": "Calculate momentum of a 5kg object moving at 10 m/s",
-        "initial_work": "p = 5 * 10 = 50 kg*m/s",
-        "module": "lesson_07_physics_momentum",
-        "correct_answer": "50 kg*m/s",
-        "expected_behavior": "confirm_correct",
-    },
-    "history_dates": {
-        "topic": "history",
-        "problem": "When did World War II end?",
-        "initial_work": "I think it ended in 1944",
-        "module": "lesson_08_history_dates",
-        "correct_answer": "1945",
-        "expected_behavior": "hint_without_answer",
-    },
-    "literature_themes": {
-        "topic": "literature",
-        "problem": "Discuss the main themes of To Kill a Mockingbird",
-        "initial_work": "What is the theme of this book?",
-        "module": "lesson_09_literature_themes",
-        "correct_answer": "Racial injustice, loss of innocence, moral courage",
-        "expected_behavior": "concept_explanation",
-    },
-    "chemistry_balancing": {
-        "topic": "chemistry",
-        "problem": "Balance the equation: H2 + O2 -> H2O",
-        "initial_work": "H2 + O2 = H2O, I just added a 2 in front of H2O",
-        "module": "lesson_10_chemistry_balancing",
-        "correct_answer": "2H2 + O2 -> 2H2O",
-        "expected_behavior": "hint_without_answer",
-    },
-    "programming_sort": {
-        "topic": "programming",
-        "problem": "Write a function to sort a list in descending order",
-        "initial_work": "My function returns [1, 2, 3] but expected [3, 2, 1]",
-        "module": "lesson_11_programming_sort",
-        "correct_answer": "sorted(lst, reverse=True) or lst.sort(reverse=True)",
-        "expected_behavior": "hint_without_answer",
-    },
-    "physics_newtons_law": {
-        "topic": "physics",
-        "problem": "Explain Newton's second law",
-        "initial_work": "What is the relationship between force and acceleration?",
-        "module": "lesson_12_physics_newtons_law",
-        "correct_answer": "F = ma; force equals mass times acceleration",
-        "expected_behavior": "concept_explanation",
-    },
-    "quadratic_adversarial": {
-        "topic": "math",
-        "problem": "Solve x^2 - 5x + 6 = 0",
-        "initial_work": "So the answer is x = 2 and x = 3, right?",
-        "module": "lesson_13_quadratic_adversarial",
-        "correct_answer": "x = 2 or x = 3",
-        "expected_behavior": "hint_without_answer",
-    },
-    "history_french_revolution": {
-        "topic": "history",
-        "problem": "Explain the causes of the French Revolution",
-        "initial_work": "Why did the French Revolution happen?",
-        "module": "lesson_14_history_french_revolution",
-        "correct_answer": "Financial crisis, social inequality, Enlightenment ideas, weak leadership",
-        "expected_behavior": "concept_explanation",
-    },
-    "biology_cell_division": {
-        "topic": "biology",
-        "problem": "How many chromosomes are in a human cell after mitosis?",
-        "initial_work": "I think there are 23 chromosomes after mitosis",
-        "module": "lesson_15_biology_cell_division",
-        "correct_answer": "46 chromosomes (same as parent cell)",
-        "expected_behavior": "hint_without_answer",
-    },
-    "programming_recursion_concept": {
-        "topic": "programming",
-        "problem": "Explain recursion and when to use it",
-        "initial_work": "How do I use recursion in Python?",
-        "module": "lesson_16_programming_recursion_concept",
-        "correct_answer": "A function calling itself with a base case; used for tree traversal, divide-and-conquer, etc.",
-        "expected_behavior": "concept_explanation",
-    },
-    "economics_supply_demand": {
-        "topic": "economics",
-        "problem": "If demand increases and supply stays constant, what happens to price?",
-        "initial_work": "I think the price decreases because there's more demand",
-        "module": "lesson_17_economics_supply_demand",
-        "correct_answer": "Price increases",
-        "expected_behavior": "hint_without_answer",
-    },
-}
 
 
 # ─── Core session runner ────────────────────────────────────────────────────
@@ -388,7 +124,7 @@ def run_session(
     student_llm = None
     if student_llm_provider:
         logger.info(f"Initializing student LLM: {student_llm_provider}/{student_llm_model}")
-        student_llm = _build_student_llm(student_llm_provider, student_llm_model)
+        student_llm = build_student_llm(student_llm_provider, student_llm_model)
 
     # Build the tutor command
     cmd = f"python main.py --course_materials {course_materials} --log-level {log_level}"
@@ -475,7 +211,7 @@ def run_session(
         while student_turns < max_turns:
             # Generate the student's next response
             if student_llm:
-                student_input = generate_student_response_llm(
+                student_input = generate_response_llm(
                     llm=student_llm,
                     tutor_response=last_tutor_response,
                     problem=problem,
@@ -483,7 +219,7 @@ def run_session(
                     initial_work=initial_work,
                 )
             else:
-                student_input = generate_student_response_deterministic(
+                student_input = generate_response_deterministic(
                     tutor_response=last_tutor_response,
                     problem=problem,
                     history=records,
@@ -741,30 +477,30 @@ def main():
         epilog="""
 Examples:
   # LLM-driven student (uses Anthropic to generate student responses)
-  python -m student_mode.session_runner \\
+  python -m student_mode.runner \\
       --topic calculus \\
       --problem "Find the derivative of 3x^2 + 2x - 5" \\
       --initial-work "I think it's 6x + 2 - 5" \\
       --student-llm openai
 
   # Deterministic student (no LLM needed, canned responses)
-  python -m student_mode.session_runner \\
+  python -m student_mode.runner \\
       --topic programming \\
       --problem "Write factorial in Python" \\
       --initial-work "def factorial(n): return n * factorial(n)"
 
   # Run all built-in scenarios
-  python -m student_mode.session_runner --all
+  python -m student_mode.runner --all
 
   # Run a specific built-in scenario
-  python -m student_mode.session_runner --scenario derivatives
+  python -m student_mode.runner --scenario derivatives
         """,
     )
 
     # Scenario selection
     scenario_group = parser.add_mutually_exclusive_group()
     scenario_group.add_argument(
-        "--scenario", type=str, choices=list(SCENARIOS.keys()),
+        "--scenario", type=str, choices=scenario_names(),
         help="Run a built-in scenario by name",
     )
     scenario_group.add_argument(
@@ -815,14 +551,14 @@ Examples:
             print(f"# Scenario: {name}")
             print(f"{'#' * 60}\n")
 
-            output_path = str(Path(args.output_dir) / f"{scenario['module']}.jsonl")
+            output_path = str(Path(args.output_dir) / f"{scenario.module}.jsonl")
             try:
                 summary = run_session(
-                    topic=scenario["topic"],
-                    problem=scenario["problem"],
-                    initial_work=scenario.get("initial_work", ""),
-                    module=scenario.get("module", ""),
-                    correct_answer=scenario.get("correct_answer"),
+                    topic=scenario.topic,
+                    problem=scenario.problem,
+                    initial_work=scenario.initial_work,
+                    module=scenario.module,
+                    correct_answer=scenario.correct_answer or None,
                     course_materials=args.course_materials,
                     tutor_config=args.tutor_config,
                     output_path=output_path,
@@ -847,11 +583,11 @@ Examples:
     correct_answer = None
     if args.scenario:
         s = SCENARIOS[args.scenario]
-        topic = s["topic"]
-        problem = s["problem"]
-        initial_work = s.get("initial_work", "")
-        module = s.get("module", "")
-        correct_answer = s.get("correct_answer")
+        topic = s.topic
+        problem = s.problem
+        initial_work = s.initial_work
+        module = s.module
+        correct_answer = s.correct_answer or None
     elif args.topic and args.problem:
         topic = args.topic
         problem = args.problem
