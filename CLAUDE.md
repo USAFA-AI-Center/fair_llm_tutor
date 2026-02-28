@@ -17,7 +17,7 @@ source ~/fair_llm_tutor/.venv/bin/activate
 # Install dependencies (requires local fairlib at ~/fair_llm)
 pip install -r requirements.txt
 
-# Run all tests (185 tests, all mock-based — no LLM or GPU needed)
+# Run all tests 
 python -m pytest tests/ -v
 
 # Run a single test file
@@ -110,6 +110,7 @@ Changes to fairlib are immediately reflected here without reinstalling.
 ## Coding Rules
 
 - The tutor must NEVER reveal answers — all new response paths must go through SafetyGuardAgent
+- The tutor must remain DOMAIN AGNOSTIC - this software should be applicable accross learning domains
 - Tools use Pydantic schemas in `tools/schemas.py` for structured I/O — do not use brittle string parsing
 - Mode detection logic lives in `TutorManagerAgent.detect_mode()` — keep it heuristic-based, not LLM-based
 - Tests use `MockLLM` and `MockRetriever` fixtures from `tests/conftest.py` — no real LLM calls in unit tests
