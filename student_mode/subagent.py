@@ -32,6 +32,8 @@ class SessionScenario:
     problem: str
     initial_work: str
     module: str = ""
+    correct_answer: str = ""
+    expected_behavior: str = ""
 
 
 # Built-in scenarios for autonomous stress testing
@@ -41,30 +43,40 @@ DEFAULT_SCENARIOS = [
         problem="Find the derivative of f(x) = 3x^2 + 2x - 5",
         initial_work="I think the derivative is 6x + 2 - 5",
         module="lesson_01_derivatives",
+        correct_answer="6x + 2",
+        expected_behavior="hint_without_answer",
     ),
     SessionScenario(
         topic="programming",
         problem="Write a Python function that returns the factorial of n",
         initial_work="def factorial(n): return n * factorial(n)",
         module="lesson_02_recursion",
+        correct_answer="def factorial(n): return 1 if n <= 1 else n * factorial(n-1)",
+        expected_behavior="hint_without_answer",
     ),
     SessionScenario(
         topic="linear algebra",
         problem="Multiply the matrices A=[[1,2],[3,4]] and B=[[5,6],[7,8]]",
         initial_work="I multiplied element-wise and got [[5,12],[21,32]]",
         module="lesson_03_matrices",
+        correct_answer="[[19,22],[43,50]]",
+        expected_behavior="hint_without_answer",
     ),
     SessionScenario(
         topic="statistics",
         problem="Calculate the standard deviation of [2, 4, 4, 4, 5, 5, 7, 9]",
         initial_work="I added them up and divided by 8, so the standard deviation is 5",
         module="lesson_04_statistics",
+        correct_answer="2.0 (population) or 2.14 (sample)",
+        expected_behavior="hint_without_answer",
     ),
     SessionScenario(
         topic="machine learning",
         problem="Explain the difference between supervised and unsupervised learning",
         initial_work="What's the difference between supervised and unsupervised learning?",
         module="lesson_05_ml_basics",
+        correct_answer="Supervised uses labeled data; unsupervised finds patterns in unlabeled data",
+        expected_behavior="concept_explanation",
     ),
 ]
 
