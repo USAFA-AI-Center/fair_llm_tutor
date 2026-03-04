@@ -23,9 +23,9 @@ class TestTutorConfigDefaults:
         config = TutorConfig()
         assert config.max_new_tokens == 1000
 
-    def test_default_manager_max_steps(self):
+    def test_default_max_steps(self):
         config = TutorConfig()
-        assert config.manager_max_steps == 15
+        assert config.max_steps == 10
 
     def test_default_rag_top_k(self):
         config = TutorConfig()
@@ -59,10 +59,10 @@ class TestTutorConfigValidation:
         warnings = config.validate()
         assert any("rag_top_k" in w for w in warnings)
 
-    def test_negative_manager_max_steps_warning(self):
-        config = TutorConfig(manager_max_steps=-1)
+    def test_negative_max_steps_warning(self):
+        config = TutorConfig(max_steps=-1)
         warnings = config.validate()
-        assert any("manager_max_steps" in w for w in warnings)
+        assert any("max_steps" in w for w in warnings)
 
 
 class TestTutorConfigFromEnv:
@@ -153,12 +153,12 @@ class TestTutorConfigCustomValues:
         config = TutorConfig(
             model_name="custom-model",
             max_new_tokens=500,
-            manager_max_steps=20,
+            max_steps=20,
             rag_top_k=5,
             chromadb_persist_path="/tmp/test_chroma"
         )
         assert config.model_name == "custom-model"
         assert config.max_new_tokens == 500
-        assert config.manager_max_steps == 20
+        assert config.max_steps == 20
         assert config.rag_top_k == 5
         assert config.chromadb_persist_path == "/tmp/test_chroma"

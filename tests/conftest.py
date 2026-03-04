@@ -33,6 +33,54 @@ class MockLLM:
         return self.invoke(messages, **kwargs)
 
 
+class SequenceMockLLM(MockLLM):
+    """Mock LLM that returns different responses per call.
+
+    Enables testing multi-step ReAct loops where each call to the LLM
+    should produce a different response (planning step 1, step 2, etc.)
+    """
+
+    def __init__(self, responses: list[str]):
+        super().__init__(responses[0] if responses else "")
+        self._responses = responses
+        self._index = 0
+
+    def invoke(self, messages, **kwargs):
+        self.call_count += 1
+        self.last_messages = messages
+        response = self._responses[min(self._index, len(self._responses) - 1)]
+        self._index += 1
+        return MockMessage(response)
+
+    async def ainvoke(self, messages, **kwargs):
+        return self.invoke(messages, **kwargs)
+
+
+class FailingMockLLM(MockLLM):
+    """Mock LLM that raises an exception on invoke."""
+
+    def __init__(self, error: Exception = None):
+        super().__init__("")
+        self._error = error or RuntimeError("LLM service unavailable")
+
+    def invoke(self, messages, **kwargs):
+        self.call_count += 1
+        raise self._error
+
+    async def ainvoke(self, messages, **kwargs):
+        return self.invoke(messages, **kwargs)
+
+
+class FailingMockRetriever:
+    """Mock retriever that raises an exception on retrieve."""
+
+    def __init__(self, error: Exception = None):
+        self._error = error or RuntimeError("Retriever service unavailable")
+
+    def retrieve(self, query, top_k=3):
+        raise self._error
+
+
 class MockRetriever:
     """Mock retriever that returns configurable documents."""
 

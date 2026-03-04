@@ -108,7 +108,11 @@ Focus on conceptual understanding.
 """
 
         messages = [Message(role="user", content=prompt)]
-        response = self.llm.invoke(messages)
+        try:
+            response = self.llm.invoke(messages)
+        except Exception as e:
+            logger.error(f"Concept explanation generation failed: {e}", exc_info=True)
+            return f"ERROR: Concept explanation generation failed. {str(e)}"
 
         explanation = response.content.strip()
 
@@ -176,7 +180,11 @@ Focus on conceptual understanding.
 
         # Generate hint using LLM
         messages = [Message(role="user", content=prompt)]
-        response = self.llm.invoke(messages)
+        try:
+            response = self.llm.invoke(messages)
+        except Exception as e:
+            logger.error(f"Hint generation failed: {e}", exc_info=True)
+            return f"ERROR: Hint generation failed. {str(e)}"
 
         hint_text = response.content.strip()
 
@@ -203,7 +211,11 @@ Create a response that:
 """
 
         messages = [Message(role="user", content=prompt)]
-        response = self.llm.invoke(messages)
+        try:
+            response = self.llm.invoke(messages)
+        except Exception as e:
+            logger.error(f"Success response generation failed: {e}", exc_info=True)
+            return f"ERROR: Success response generation failed. {str(e)}"
 
         return (
             f"SUCCESS RESPONSE:\n"

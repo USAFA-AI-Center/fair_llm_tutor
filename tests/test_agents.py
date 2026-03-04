@@ -1,4 +1,4 @@
-"""Tests for agent creation and prompt construction."""
+"""Tests for TutorAgent creation and prompt construction."""
 
 import sys
 from pathlib import Path
@@ -10,209 +10,138 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from tests.conftest import MockLLM, MockRetriever
 
 
-class TestManagerAgentPrompt:
-    """Tests for TutorManagerAgent prompt construction."""
+class TestTutorAgentCreation:
+    """Tests for TutorAgent factory method and structural properties."""
 
-    def test_prompt_has_consistent_mode_names(self):
-        """Verify no WORK_VALIDATION or QUESTION_ANSWERING mode names remain."""
-        from agents.manager_agent import TutorManagerAgent
+    def test_uses_react_planner(self):
+        from fairlib import WorkingMemory
+        from fairlib.modules.planning.react_planner import SimpleReActPlanner
+        from agents.tutor_agent import TutorAgent
 
-        builder = TutorManagerAgent._create_manager_prompt()
+        agent = TutorAgent.create(MockLLM(), WorkingMemory(), MockRetriever())
+        assert isinstance(agent.planner, SimpleReActPlanner)
 
-        role_text = builder.role_definition.text
-        assert "WORK_VALIDATION" not in role_text
-        assert "QUESTION_ANSWERING" not in role_text
-        assert "HINT" in role_text
-        assert "CONCEPT_EXPLANATION" in role_text
+    def test_is_stateful(self):
+        from fairlib import WorkingMemory
+        from agents.tutor_agent import TutorAgent
 
-        for fi in builder.format_instructions:
-            fi_text = fi.text
-            assert "WORK_VALIDATION" not in fi_text
-            assert "QUESTION_ANSWERING" not in fi_text
+        agent = TutorAgent.create(MockLLM(), WorkingMemory(), MockRetriever())
+        assert agent.stateless is False
 
-    def test_prompt_uses_json_delegation_format(self):
-        """Verify delegation templates use JSON, not ||| format."""
-        from agents.manager_agent import TutorManagerAgent
+    def test_default_max_steps(self):
+        from fairlib import WorkingMemory
+        from agents.tutor_agent import TutorAgent
 
-        builder = TutorManagerAgent._create_manager_prompt()
+        agent = TutorAgent.create(MockLLM(), WorkingMemory(), MockRetriever())
+        assert agent.max_steps == 10
 
-        # Check format instructions contain JSON examples
-        all_fi_text = " ".join(fi.text for fi in builder.format_instructions)
-        assert "|||" not in all_fi_text, "Format instructions still contain ||| delimiter"
-        assert '"problem"' in all_fi_text or '"mode"' in all_fi_text
+    def test_custom_max_steps(self):
+        from fairlib import WorkingMemory
+        from agents.tutor_agent import TutorAgent
 
-    def test_prompt_examples_use_json_delegation(self):
-        """Verify examples use JSON delegation, not ||| format."""
-        from agents.manager_agent import TutorManagerAgent
+        agent = TutorAgent.create(
+            MockLLM(), WorkingMemory(), MockRetriever(), max_steps=20
+        )
+        assert agent.max_steps == 20
 
-        builder = TutorManagerAgent._create_manager_prompt()
+    def test_has_tool_executor(self):
+        from fairlib import WorkingMemory
+        from fairlib.modules.action.executor import ToolExecutor
+        from agents.tutor_agent import TutorAgent
 
-        for example in builder.examples:
-            assert "|||" not in example.text, (
-                f"Example still contains ||| delimiter: {example.text[:100]}"
-            )
+        agent = TutorAgent.create(MockLLM(), WorkingMemory(), MockRetriever())
+        assert isinstance(agent.tool_executor, ToolExecutor)
 
-    def test_prompt_examples_are_domain_diverse(self):
-        """Verify examples span multiple domains, not just physics/math."""
-        from agents.manager_agent import TutorManagerAgent
+    def test_has_all_three_tools(self):
+        from fairlib import WorkingMemory
+        from agents.tutor_agent import TutorAgent
 
-        builder = TutorManagerAgent._create_manager_prompt()
+        agent = TutorAgent.create(MockLLM(), WorkingMemory(), MockRetriever())
+        tool_names = set(agent.tool_executor.tool_registry.get_all_tools().keys())
+        assert "student_work_analyzer" in tool_names
+        assert "socratic_hint_generator" in tool_names
+        assert "answer_revelation_analyzer" in tool_names
+
+    def test_has_role_description(self):
+        from fairlib import WorkingMemory
+        from agents.tutor_agent import TutorAgent
+
+        agent = TutorAgent.create(MockLLM(), WorkingMemory(), MockRetriever())
+        assert agent.role_description
+        assert len(agent.role_description) > 20
+
+
+class TestTutorAgentPrompt:
+    """Tests for TutorAgent prompt construction."""
+
+    def _get_prompt(self):
+        from agents.tutor_agent import TutorAgent
+        return TutorAgent._create_prompt()
+
+    def test_role_mentions_socratic(self):
+        builder = self._get_prompt()
+        assert "socratic" in builder.role_definition.text.lower()
+
+    def test_role_mentions_never_reveal(self):
+        builder = self._get_prompt()
+        assert "never reveal" in builder.role_definition.text.lower()
+
+    def test_role_mentions_domain_agnostic(self):
+        builder = self._get_prompt()
+        assert "domain-agnostic" in builder.role_definition.text.lower()
+
+    def test_role_mentions_direct_address(self):
+        builder = self._get_prompt()
+        role_text = builder.role_definition.text.lower()
+        assert "directly" in role_text or "second person" in role_text
+
+    def test_has_format_instructions(self):
+        builder = self._get_prompt()
+        assert len(builder.format_instructions) >= 2
+
+    def test_has_examples(self):
+        builder = self._get_prompt()
+        assert len(builder.examples) >= 2
+
+    def test_examples_cover_hint_mode(self):
+        builder = self._get_prompt()
+        all_example_text = " ".join(e.text for e in builder.examples)
+        assert "HINT" in all_example_text
+
+    def test_examples_cover_concept_mode(self):
+        builder = self._get_prompt()
+        all_example_text = " ".join(e.text for e in builder.examples)
+        assert "CONCEPT_EXPLANATION" in all_example_text
+
+    def test_examples_are_domain_diverse(self):
+        builder = self._get_prompt()
         all_example_text = " ".join(e.text for e in builder.examples).lower()
-
-        # Should have at least one non-STEM example
-        non_stem_indicators = ["literature", "history", "essay", "theme", "novel", "war"]
+        non_stem_indicators = ["literature", "history", "essay", "theme", "novel"]
         has_non_stem = any(ind in all_example_text for ind in non_stem_indicators)
         assert has_non_stem, "Examples should include non-STEM domains"
 
-    def test_prompt_has_correct_routing_logic(self):
-        """Verify work submission routes to HINT, questions to CONCEPT_EXPLANATION."""
-        from agents.manager_agent import TutorManagerAgent
+    def test_no_old_agent_names_in_prompt(self):
+        """Old multi-agent names must not appear in the prompt."""
+        builder = self._get_prompt()
 
-        builder = TutorManagerAgent._create_manager_prompt()
-        role_text = builder.role_definition.text
+        all_text = builder.role_definition.text
+        all_text += " ".join(fi.text for fi in builder.format_instructions)
+        all_text += " ".join(e.text for e in builder.examples)
 
-        assert "submitting work" in role_text.lower() or "showing work" in role_text.lower()
-        assert "guidance" in role_text.lower()
+        for old_name in ["SafetyGuard", "MisconceptionDetector",
+                         "HintGenerator", "delegate"]:
+            assert old_name not in all_text, (
+                f"Old agent name '{old_name}' found in prompt"
+            )
 
-    def test_prompt_has_examples(self):
-        from agents.manager_agent import TutorManagerAgent
+    def test_all_tool_names_referenced(self):
+        builder = self._get_prompt()
+        all_text = builder.role_definition.text
+        all_text += " ".join(fi.text for fi in builder.format_instructions)
+        all_text += " ".join(e.text for e in builder.examples)
 
-        builder = TutorManagerAgent._create_manager_prompt()
-        assert len(builder.examples) >= 2
-
-    def test_prompt_role_definition_not_empty(self):
-        from agents.manager_agent import TutorManagerAgent
-
-        builder = TutorManagerAgent._create_manager_prompt()
-        assert builder.role_definition is not None
-        assert len(builder.role_definition.text) > 100
-
-
-class TestMisconceptionDetectorAgent:
-    """Tests for MisconceptionDetectorAgent with DirectToolPlanner."""
-
-    def test_uses_direct_tool_planner(self):
-        from fairlib import WorkingMemory
-        from fairlib.modules.planning.direct_planner import DirectToolPlanner
-        from agents.misconception_detector_agent import MisconceptionDetectorAgent
-
-        agent = MisconceptionDetectorAgent.create(
-            MockLLM(), WorkingMemory(), MockRetriever()
-        )
-        assert isinstance(agent.planner, DirectToolPlanner)
-
-    def test_correct_tool_name(self):
-        from fairlib import WorkingMemory
-        from agents.misconception_detector_agent import MisconceptionDetectorAgent
-
-        agent = MisconceptionDetectorAgent.create(
-            MockLLM(), WorkingMemory(), MockRetriever()
-        )
-        assert agent.planner.tool_name == "student_work_analyzer"
-
-    def test_is_stateless(self):
-        from fairlib import WorkingMemory
-        from agents.misconception_detector_agent import MisconceptionDetectorAgent
-
-        agent = MisconceptionDetectorAgent.create(
-            MockLLM(), WorkingMemory(), MockRetriever()
-        )
-        assert agent.stateless is True
-
-    def test_has_tool_name_constant(self):
-        from agents.misconception_detector_agent import MisconceptionDetectorAgent
-
-        assert MisconceptionDetectorAgent.TOOL_NAME == "student_work_analyzer"
-
-    def test_max_steps_reduced(self):
-        from fairlib import WorkingMemory
-        from agents.misconception_detector_agent import MisconceptionDetectorAgent
-
-        agent = MisconceptionDetectorAgent.create(
-            MockLLM(), WorkingMemory(), MockRetriever()
-        )
-        assert agent.max_steps == 3
-
-
-class TestHintGeneratorAgent:
-    """Tests for HintGeneratorAgent with DirectToolPlanner."""
-
-    def test_uses_direct_tool_planner(self):
-        from fairlib import WorkingMemory
-        from fairlib.modules.planning.direct_planner import DirectToolPlanner
-        from agents.hint_generator_agent import HintGeneratorAgent
-
-        agent = HintGeneratorAgent.create(
-            MockLLM(), WorkingMemory(), MockRetriever()
-        )
-        assert isinstance(agent.planner, DirectToolPlanner)
-
-    def test_correct_tool_name(self):
-        from fairlib import WorkingMemory
-        from agents.hint_generator_agent import HintGeneratorAgent
-
-        agent = HintGeneratorAgent.create(
-            MockLLM(), WorkingMemory(), MockRetriever()
-        )
-        assert agent.planner.tool_name == "socratic_hint_generator"
-
-    def test_is_stateless(self):
-        from fairlib import WorkingMemory
-        from agents.hint_generator_agent import HintGeneratorAgent
-
-        agent = HintGeneratorAgent.create(
-            MockLLM(), WorkingMemory(), MockRetriever()
-        )
-        assert agent.stateless is True
-
-    def test_has_tool_name_constant(self):
-        from agents.hint_generator_agent import HintGeneratorAgent
-
-        assert HintGeneratorAgent.TOOL_NAME == "socratic_hint_generator"
-
-    def test_max_steps_reduced(self):
-        from fairlib import WorkingMemory
-        from agents.hint_generator_agent import HintGeneratorAgent
-
-        agent = HintGeneratorAgent.create(
-            MockLLM(), WorkingMemory(), MockRetriever()
-        )
-        assert agent.max_steps == 3
-
-
-class TestSafetyGuardAgent:
-    """Tests for SafetyGuardAgent with DirectToolPlanner."""
-
-    def test_uses_direct_tool_planner(self):
-        from fairlib import WorkingMemory
-        from fairlib.modules.planning.direct_planner import DirectToolPlanner
-        from agents.safety_guard_agent import SafetyGuardAgent
-
-        agent = SafetyGuardAgent.create(MockLLM(), WorkingMemory())
-        assert isinstance(agent.planner, DirectToolPlanner)
-
-    def test_correct_tool_name(self):
-        from fairlib import WorkingMemory
-        from agents.safety_guard_agent import SafetyGuardAgent
-
-        agent = SafetyGuardAgent.create(MockLLM(), WorkingMemory())
-        assert agent.planner.tool_name == "answer_revelation_analyzer"
-
-    def test_is_stateless(self):
-        from fairlib import WorkingMemory
-        from agents.safety_guard_agent import SafetyGuardAgent
-
-        agent = SafetyGuardAgent.create(MockLLM(), WorkingMemory())
-        assert agent.stateless is True
-
-    def test_has_tool_name_constant(self):
-        from agents.safety_guard_agent import SafetyGuardAgent
-
-        assert SafetyGuardAgent.TOOL_NAME == "answer_revelation_analyzer"
-
-    def test_max_steps_reduced(self):
-        from fairlib import WorkingMemory
-        from agents.safety_guard_agent import SafetyGuardAgent
-
-        agent = SafetyGuardAgent.create(MockLLM(), WorkingMemory())
-        assert agent.max_steps == 3
+        for tool_name in ["student_work_analyzer", "socratic_hint_generator",
+                          "answer_revelation_analyzer"]:
+            assert tool_name in all_text, (
+                f"Tool name '{tool_name}' not found in prompt"
+            )

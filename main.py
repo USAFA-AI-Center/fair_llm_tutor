@@ -43,13 +43,8 @@ from fairlib import (
 )
 
 from fairlib.utils.document_processor import DocumentProcessor
-from fairlib.modules.agent.multi_agent_runner import HierarchicalAgentRunner
 
-# Import tutor specific agents
-from agents.hint_generator_agent import HintGeneratorAgent
-from agents.misconception_detector_agent import MisconceptionDetectorAgent
-from agents.safety_guard_agent import SafetyGuardAgent
-from agents.manager_agent import TutorManagerAgent
+from agents.tutor_agent import TutorAgent
 from config import TutorConfig
 
 logger = logging.getLogger(__name__)
@@ -103,11 +98,8 @@ class TutorSession:
             auth_token=self.config.auth_token,
         )
 
-        # Build agent team
-        self.agents = self._build_agents()
-
-        # Create runner
-        self.runner = self._build_runner()
+        # Build single tutor agent
+        self.agent = self._build_agent()
 
         logger.info("Domain-Agnostic Tutor initialized successfully!")
 
@@ -167,43 +159,13 @@ class TutorSession:
 
         return SimpleRetriever(vector_store)
 
-    def _build_agents(self) -> dict:
-        """Build all specialist agents with LLM+RAG tools"""
-        agents = {}
-
-        agents["SafetyGuard"] = SafetyGuardAgent.create(
-            llm=self.llm,
-            memory=WorkingMemory()
-        )
-
-        agents["MisconceptionDetector"] = MisconceptionDetectorAgent.create(
+    def _build_agent(self) -> TutorAgent:
+        """Build the single tutor agent with all tools."""
+        return TutorAgent.create(
             llm=self.llm,
             memory=WorkingMemory(),
-            retriever=self.retriever
-        )
-
-        agents["HintGenerator"] = HintGeneratorAgent.create(
-            llm=self.llm,
-            memory=WorkingMemory(),
-            retriever=self.retriever
-        )
-
-        return agents
-
-    def _build_runner(self) -> HierarchicalAgentRunner:
-        """Build the hierarchical multi-agent runner"""
-        manager_memory = WorkingMemory()
-
-        manager = TutorManagerAgent.create(
-            llm=self.llm,
-            memory=manager_memory,
-            workers=self.agents
-        )
-
-        return HierarchicalAgentRunner(
-            manager_agent=manager,
-            workers=self.agents,
-            max_steps=self.config.runner_max_steps
+            retriever=self.retriever,
+            max_steps=self.config.max_steps,
         )
 
     async def process_student_work(self, problem_text: str, student_work: str, topic: str) -> str:
@@ -227,20 +189,15 @@ class TutorSession:
         )
 
         # Prepend preprocessor mode hint if detected
-        detected_mode = TutorManagerAgent.detect_mode(student_work)
+        detected_mode = TutorAgent.detect_mode(student_work)
         if detected_mode:
             prefix = f"PREPROCESSOR DETECTED MODE: {detected_mode}"
-            if (detected_mode == "CONCEPT_EXPLANATION"
-                    and TutorManagerAgent.has_answer_content(student_work)):
-                prefix += (
-                    "\nPREPROCESSOR WARNING: Answer-like content detected. "
-                    "SafetyGuard REQUIRED."
-                )
+            prefix += "\nSafety check REQUIRED."
             request = f"{prefix}\n\n{request}"
 
-        logger.info("Processing student work through multi-agent system...")
+        logger.info("Processing student work through agent...")
 
-        response = await self.runner.arun(request)
+        response = await self.agent.arun(request)
 
         return response
 

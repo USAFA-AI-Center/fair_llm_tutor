@@ -51,7 +51,11 @@ class StudentWorkAnalyzerTool(AbstractTool):
 
             # Query course materials for relevant context
             kb_query = f"Common errors and misconceptions in {inp.topic}: {inp.problem}"
-            relevant_docs = self.retriever.retrieve(kb_query, top_k=3)
+            try:
+                relevant_docs = self.retriever.retrieve(kb_query, top_k=3)
+            except Exception:
+                logger.warning("Failed to retrieve docs for diagnostic analysis", exc_info=True)
+                relevant_docs = []
 
             # Extract content from retrieved documents
             course_context = "\n\n".join([
