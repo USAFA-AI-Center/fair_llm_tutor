@@ -1,15 +1,10 @@
 """Student history checking tool — pure computation, no LLM calls."""
 
-import json
-import logging
-
 from pydantic import ValidationError
 
 from fairlib.core.interfaces.tools import AbstractTool
 
 from tools.schemas import HistoryCheckInput
-
-logger = logging.getLogger(__name__)
 
 
 class CheckStudentHistoryTool(AbstractTool):

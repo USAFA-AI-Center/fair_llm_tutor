@@ -1,6 +1,5 @@
 """RAG retrieval tool — pure computation, no LLM calls."""
 
-import json
 import logging
 
 from pydantic import ValidationError

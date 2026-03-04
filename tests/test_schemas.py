@@ -11,7 +11,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from tools.schemas import (
     InteractionMode,
     Severity,
-    SafetyVerdict,
     RetrievalInput,
     HistoryCheckInput,
     HintLevelInput,
@@ -27,10 +26,6 @@ class TestEnums:
         assert Severity.CRITICAL == "Critical"
         assert Severity.MAJOR == "Major"
         assert Severity.MINOR == "Minor"
-
-    def test_safety_verdict_values(self):
-        assert SafetyVerdict.SAFE == "SAFE"
-        assert SafetyVerdict.UNSAFE == "UNSAFE"
 
 
 class TestRetrievalInput:

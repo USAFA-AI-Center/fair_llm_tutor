@@ -23,11 +23,6 @@ class Severity(str, Enum):
     MINOR = "Minor"
 
 
-class SafetyVerdict(str, Enum):
-    SAFE = "SAFE"
-    UNSAFE = "UNSAFE"
-
-
 # --- Computational tool I/O ---
 
 class RetrievalInput(BaseModel):

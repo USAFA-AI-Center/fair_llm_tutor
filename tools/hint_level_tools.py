@@ -1,15 +1,10 @@
 """Hint level calculation tool — pure computation, no LLM calls."""
 
-import json
-import logging
-
 from pydantic import ValidationError
 
 from fairlib.core.interfaces.tools import AbstractTool
 
 from tools.schemas import HintLevelInput
-
-logger = logging.getLogger(__name__)
 
 HINT_LEVEL_DESCRIPTIONS = {
     1: "General conceptual reminder — very broad guidance",
