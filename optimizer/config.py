@@ -16,9 +16,9 @@ CORE5_SCENARIOS = [
 # Files the optimizer is allowed to modify.
 MODIFIABLE_FILES = [
     "agents/tutor_agent.py",
-    "tools/safety_tools.py",
-    "tools/diagnostic_tools.py",
-    "tools/pedagogical_tools.py",
+    "tools/retrieval_tools.py",
+    "tools/history_tools.py",
+    "tools/hint_level_tools.py",
     "tools/schemas.py",
     "config.py",
 ]

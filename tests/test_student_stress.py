@@ -14,8 +14,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agents.tutor_agent import TutorAgent
-from tests.conftest import MockLLM, MockRetriever, build_json_input
-from tools.schemas import HintInput, InteractionMode, Severity
+from tools.hint_level_tools import GetHintLevelTool
 
 
 # ============================================================================
@@ -217,57 +216,40 @@ class TestSafetyBypassRisks:
 
 
 class TestHintEscalationEdgeCases:
-    """Edge cases in hint_level handling with JSON input."""
+    """Edge cases in hint_level handling via GetHintLevelTool."""
 
-    def _make_tool(self):
-        from tools.pedagogical_tools import SocraticHintGeneratorTool
-        return SocraticHintGeneratorTool(
-            llm=MockLLM("Socratic hint text"), retriever=MockRetriever()
-        )
+    def setup_method(self):
+        self.tool = GetHintLevelTool()
 
     def test_hint_level_negative(self):
-        """hint_level=-1 should clamp to 1."""
-        tool = self._make_tool()
-        result = tool.use(build_json_input(
-            HintInput,
-            mode=InteractionMode.HINT, problem="Solve 2x=10", student_work="x=3",
-            misconception="division error", severity=Severity.MINOR, topic="algebra",
-            hint_level=-1
-        ))
-        assert "Level 1" in result
-
-    def test_hint_level_ignored_in_concept_mode(self):
-        """hint_level in CONCEPT_EXPLANATION mode should be ignored entirely."""
-        tool = self._make_tool()
-        result = tool.use(build_json_input(
-            HintInput,
-            mode=InteractionMode.CONCEPT_EXPLANATION, concept="momentum",
-            question="What is momentum?", topic="physics",
-            hint_level=4
-        ))
-        assert "CONCEPT EXPLANATION" in result
-        assert "Level 4" not in result
+        """hint_level_override=-1 should clamp to 1."""
+        import json
+        result = self.tool.use(json.dumps({
+            "severity": "Minor", "hint_level_override": -1
+        }))
+        assert "Hint Level: 1" in result
 
     def test_hint_level_none_uses_severity_default(self):
-        """Without hint_level, severity determines level as before."""
-        tool = self._make_tool()
-        result = tool.use(build_json_input(
-            HintInput,
-            mode=InteractionMode.HINT, problem="Solve 2x=10", student_work="x=3",
-            misconception="error", severity=Severity.MAJOR, topic="algebra"
-        ))
-        assert "Level 2" in result  # Major → Level 2
+        """Without override, severity determines level."""
+        import json
+        result = self.tool.use(json.dumps({"severity": "Major"}))
+        assert "Hint Level: 2" in result  # Major → Level 2
 
     def test_hint_level_large_value_clamped(self):
-        """hint_level=100 should clamp to Level 4."""
-        tool = self._make_tool()
-        result = tool.use(build_json_input(
-            HintInput,
-            mode=InteractionMode.HINT, problem="Solve 2x=10", student_work="x=3",
-            misconception="error", severity=Severity.MINOR, topic="algebra",
-            hint_level=100
-        ))
-        assert "Level 4" in result
+        """hint_level_override=100 should clamp to Level 4."""
+        import json
+        result = self.tool.use(json.dumps({
+            "severity": "Minor", "hint_level_override": 100
+        }))
+        assert "Hint Level: 4" in result
+
+    def test_hint_level_override_replaces_severity(self):
+        """Override takes precedence over severity mapping."""
+        import json
+        result = self.tool.use(json.dumps({
+            "severity": "Minor", "hint_level_override": 1
+        }))
+        assert "Hint Level: 1" in result  # Override wins over Minor→3
 
 
 # ============================================================================

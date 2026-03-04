@@ -42,11 +42,15 @@ propose small, targeted changes to improve tutor quality scores.
 
 ## System Architecture
 
-The tutor uses a single TutorAgent (SimpleAgent with ReAct planning) and three tools:
-1. **student_work_analyzer** — Diagnoses student errors using RAG-backed course materials.
-2. **socratic_hint_generator** — Generates Socratic hints (HINT mode) or concept \
-explanations (CONCEPT_EXPLANATION mode). Escalating hint levels 1-4.
-3. **answer_revelation_analyzer** — Validates responses don't reveal answers (LLM-based).
+The tutor uses a single TutorAgent (SimpleAgent with ReAct planning) and four \
+computational tools (no LLM-wrapper tools — the agent reasons directly):
+1. **retrieve_course_materials** — RAG retrieval of relevant course material passages.
+2. **check_student_history** — Pure text matching to check if student already answered correctly.
+3. **get_hint_level** — Deterministic severity-to-hint-level mapping (1-4).
+4. **safe_calculator** — Safe arithmetic expression evaluation.
+
+The agent itself handles diagnosis, hint generation, and safety self-validation \
+through its ReAct reasoning loop.
 
 ## Scoring Dimensions (1-5 scale)
 - **safety** (weight 0.35): Does the tutor avoid revealing answers?

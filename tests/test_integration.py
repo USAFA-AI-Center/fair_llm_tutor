@@ -1,10 +1,15 @@
 """Integration tests for the full TutorAgent pipeline.
 
 These tests use SequenceMockLLM to script the agent's ReAct loop and verify:
-- Tool call sequences (correct tools called in correct order)
-- Safety checks fire in both HINT and CONCEPT_EXPLANATION modes
+- Tool call sequences (correct computational tools called in correct order)
+- Agent self-validates safety in both HINT and CONCEPT_EXPLANATION modes
 - Graceful degradation when tools error
-- Unsafe response detection
+- The agent reasons about student work itself (no LLM-wrapper tools)
+
+KEY DIFFERENCE from old tests: Tools are now pure computation (no internal
+LLM calls), so the SequenceMockLLM only receives planner calls.  Each tool
+call is one planner step producing an Action, followed by one Observation
+from the computational tool — no interleaved tool-internal LLM calls.
 """
 
 import sys
@@ -20,14 +25,10 @@ from agents.tutor_agent import TutorAgent
 from main import TutorSession
 from tests.conftest import (
     SequenceMockLLM,
-    FailingMockLLM,
     FailingMockRetriever,
     MockLLM,
     MockRetriever,
-    MockMessage,
-    build_json_input,
 )
-from tools.schemas import DiagnosticInput, HintInput, SafetyInput, InteractionMode, Severity
 
 
 # ============================================================================
@@ -65,128 +66,111 @@ def _react_final_answer(thought: str, answer: str) -> str:
 
 
 # ============================================================================
-# 1. HINT mode calls all 3 tools including safety
+# 1. HINT mode uses computational tools and agent reasons
 # ============================================================================
 
 
-class TestHintModeCallsSafetyCheck:
-    """Verify HINT mode calls: student_work_analyzer → socratic_hint_generator
-    → answer_revelation_analyzer → final_answer.
+class TestHintModeWorkflow:
+    """Verify HINT mode calls: retrieve_course_materials →
+    check_student_history → get_hint_level → final_answer.
 
-    NOTE: The same SequenceMockLLM is shared between the planner and the tools
-    (StudentWorkAnalyzerTool, SocraticHintGeneratorTool, AnswerRevelationAnalyzerTool
-    each call self.llm.invoke() internally). So responses must be interleaved:
-      planner → tool_internal → planner → tool_internal → planner → tool_internal → planner
+    All tool calls are pure computation — no tool-internal LLM calls.
+    Only the planner calls the LLM.
     """
 
     @pytest.mark.asyncio
-    async def test_hint_mode_calls_safety_check(self):
-        """Full HINT pipeline: diagnose → hint → safety → answer.
-        7 LLM calls total (4 planner + 3 tool-internal)."""
-        analyzer_input = '{"problem": "Solve 2x+3=15", "student_work": "x=7", "topic": "algebra"}'
-        hint_input = '{"mode": "HINT", "problem": "Solve 2x+3=15", "student_work": "x=7", "misconception": "division error", "severity": "Minor", "topic": "algebra"}'
-        safety_input = '{"problem": "Solve 2x+3=15", "correct_answer": "x=6", "student_history": ["x=7"], "proposed_response": "Check your division step."}'
-
+    async def test_hint_mode_full_pipeline(self):
+        """Full HINT pipeline: retrieve → history check → hint level → answer.
+        4 planner-only LLM calls (no tool-internal LLM calls)."""
         llm = SequenceMockLLM([
-            # 1. Planner: call student_work_analyzer
+            # 1. Planner: retrieve course materials
             _react_tool_call(
-                "Student submitted work. Diagnosing.",
-                "student_work_analyzer",
-                analyzer_input,
+                "Student submitted work (HINT mode). Let me get context.",
+                "retrieve_course_materials",
+                '{"query": "algebra solving linear equations"}',
             ),
-            # 2. Tool-internal: student_work_analyzer's LLM call (analysis text)
-            "CORRECT_ASPECTS: Subtracted 3 correctly\n"
-            "ERROR_IDENTIFIED: Division error\n"
-            "ROOT_MISCONCEPTION: Arithmetic\n"
-            "SEVERITY: Minor\n"
-            "SUGGESTED_FOCUS: Division\n"
-            "EVIDENCE: x=7 instead of x=6",
-            # 3. Planner: call socratic_hint_generator
+            # 2. Planner: check student history
             _react_tool_call(
-                "Diagnosis complete. Generating hint.",
-                "socratic_hint_generator",
-                hint_input,
+                "Got course materials. Checking if student already answered.",
+                "check_student_history",
+                '{"correct_answer": "x = 6", "student_history": ["I got x = 7"]}',
             ),
-            # 4. Tool-internal: socratic_hint_generator's LLM call (hint text)
-            "You correctly subtracted 3 from both sides. Now check: what is 12 divided by 2?",
-            # 5. Planner: call answer_revelation_analyzer
+            # 3. Planner: get hint level
             _react_tool_call(
-                "Hint ready. Validating safety.",
-                "answer_revelation_analyzer",
-                safety_input,
+                "Student has NOT answered correctly. I see they made a minor "
+                "division error (12/2=7 instead of 6). Getting hint level.",
+                "get_hint_level",
+                '{"severity": "Minor"}',
             ),
-            # 6. Tool-internal: answer_revelation_analyzer's LLM call (verdict)
-            "VERDICT: SAFE\nREASONING: Guides without revealing.\n"
-            "STUDENT_ALREADY_ANSWERED: NO\nCONFIDENCE: High",
-            # 7. Planner: final answer
+            # 4. Planner: final answer with safety self-check
             _react_final_answer(
-                "Safe. Delivering hint.",
-                "Check your division step. What is 12 divided by 2?",
+                "Level 3 = targeted Socratic question. My hint: 'You correctly "
+                "subtracted 3 to get 12. What is 12 divided by 2?' "
+                "SAFETY CHECK: Does not reveal x=6. SAFE.",
+                "Good start! You correctly subtracted 3 from both sides to get "
+                "12. Now double-check: what is 12 divided by 2?",
             ),
         ])
 
-        agent = _build_agent(llm)
+        retriever = MockRetriever(documents=[
+            "When solving linear equations, isolate the variable."
+        ])
+        agent = _build_agent(llm, retriever)
         result = await agent.arun(
-            "PREPROCESSOR DETECTED MODE: HINT\n\n"
-            "PROBLEM: Solve 2x+3=15\nSTUDENT WORK: x=7\nTOPIC: algebra"
+            "PREPROCESSOR DETECTED MODE: HINT\n"
+            "Safety check REQUIRED.\n\n"
+            "PROBLEM: Solve 2x+3=15\n\n"
+            "STUDENT WORK: I got x = 7\n\n"
+            "TOPIC: algebra\n\n"
+            "CORRECT ANSWER (for safety check): x = 6"
         )
 
-        assert llm.call_count == 7
-        assert "Check your division step" in result
+        # Only planner LLM calls — no tool-internal LLM calls
+        assert llm.call_count == 4
+        assert "12 divided by 2" in result
 
 
 # ============================================================================
-# 2. CONCEPT mode calls safety check (regression test for safety fix)
+# 2. CONCEPT mode workflow
 # ============================================================================
 
 
-class TestConceptModeCallsSafetyCheck:
-    """Verify CONCEPT_EXPLANATION mode calls socratic_hint_generator AND
-    answer_revelation_analyzer before final_answer.
-
-    5 LLM calls total (3 planner + 2 tool-internal)."""
+class TestConceptModeWorkflow:
+    """Verify CONCEPT_EXPLANATION mode: retrieve → agent reasons → final_answer.
+    Fewer steps since no diagnosis/hint-level needed."""
 
     @pytest.mark.asyncio
-    async def test_concept_mode_calls_safety_check(self):
-        """Concept explanation pipeline: hint_gen → safety → answer."""
-        concept_input = '{"mode": "CONCEPT_EXPLANATION", "concept": "momentum", "question": "What is momentum?", "topic": "physics"}'
-        safety_input = '{"problem": "What is momentum?", "correct_answer": "N/A", "student_history": [], "proposed_response": "Momentum is the product of mass and velocity."}'
-
+    async def test_concept_mode_pipeline(self):
+        """Concept explanation: retrieve → reason → answer. 2 LLM calls."""
         llm = SequenceMockLLM([
-            # 1. Planner: call socratic_hint_generator
+            # 1. Planner: retrieve course materials
             _react_tool_call(
-                "Concept question. Generating explanation.",
-                "socratic_hint_generator",
-                concept_input,
+                "Student is asking a concept question. Getting materials.",
+                "retrieve_course_materials",
+                '{"query": "momentum physics definition"}',
             ),
-            # 2. Tool-internal: socratic_hint_generator's LLM call
-            "Momentum is defined as the product of an object's mass and velocity (p = mv).",
-            # 3. Planner: call answer_revelation_analyzer (REQUIRED)
-            _react_tool_call(
-                "Explanation ready. Must validate safety.",
-                "answer_revelation_analyzer",
-                safety_input,
-            ),
-            # 4. Tool-internal: answer_revelation_analyzer's LLM call
-            "VERDICT: SAFE\nREASONING: Concept explanation, no specific answer.\n"
-            "STUDENT_ALREADY_ANSWERED: NO\nCONFIDENCE: High",
-            # 5. Planner: final answer
+            # 2. Planner: final answer
             _react_final_answer(
-                "Safe. Delivering explanation.",
-                "Momentum is the product of mass and velocity. Can you think of an example?",
+                "I have context. Momentum is mass times velocity. "
+                "SAFETY CHECK: This is a concept explanation, no specific "
+                "problem being solved. SAFE.",
+                "Momentum is the product of an object's mass and velocity "
+                "(p = mv). Can you think of an example?",
             ),
         ])
 
-        agent = _build_agent(llm)
+        retriever = MockRetriever(documents=[
+            "Momentum p = mv, the product of mass and velocity."
+        ])
+        agent = _build_agent(llm, retriever)
         result = await agent.arun(
             "PREPROCESSOR DETECTED MODE: CONCEPT_EXPLANATION\n"
             "Safety check REQUIRED.\n\n"
-            "PROBLEM: General physics\nSTUDENT WORK: What is momentum?\nTOPIC: physics"
+            "STUDENT WORK: What is momentum?\n\nTOPIC: physics"
         )
 
-        # 3 planner calls + 2 tool-internal calls = 5 total
-        assert llm.call_count == 5
-        assert "Momentum" in result
+        assert llm.call_count == 2
+        assert "momentum" in result.lower()
 
 
 # ============================================================================
@@ -195,31 +179,24 @@ class TestConceptModeCallsSafetyCheck:
 
 
 class TestToolErrorGracefulDegradation:
-    """When a tool receives bad input, it returns an ERROR observation and the
-    agent can still produce a final answer (doesn't crash)."""
+    """When a computational tool receives bad input, it returns an ERROR
+    observation and the agent can still produce a final answer."""
 
     @pytest.mark.asyncio
     async def test_tool_error_graceful_degradation(self):
-        """Agent recovers when student_work_analyzer returns an error.
-
-        We send malformed JSON to the tool so it returns an error string
-        without making an internal LLM call — this way only the planner
-        calls the shared SequenceMockLLM.
-        """
-        # Deliberately malformed JSON — tool will return ERROR without calling LLM
-        bad_input = '{"not_a_valid_field": true}'
-
+        """Agent recovers when retrieve_course_materials returns an error."""
         llm = SequenceMockLLM([
-            # 1. Planner: call student_work_analyzer with bad input
+            # 1. Planner: call retrieve with bad input
             _react_tool_call(
                 "Diagnosing work.",
-                "student_work_analyzer",
-                bad_input,
+                "retrieve_course_materials",
+                '{"not_a_valid_field": true}',
             ),
             # 2. Planner: sees error observation, provides fallback answer
             _react_final_answer(
-                "Tool returned an error. I'll give a general hint.",
-                "Let's work through this step by step. What do you get when you subtract 1 from both sides?",
+                "Retrieval failed. I'll give a general hint based on what I know.",
+                "Let's work through this step by step. What do you get when "
+                "you subtract 1 from both sides?",
             ),
         ])
 
@@ -228,83 +205,40 @@ class TestToolErrorGracefulDegradation:
             "PROBLEM: Solve x+1=2\nSTUDENT WORK: x=0\nTOPIC: algebra"
         )
 
-        # Agent should still produce a response (not crash)
         assert llm.call_count == 2
         assert "step by step" in result.lower() or "subtract" in result.lower()
 
 
 # ============================================================================
-# 4. Unsafe response detection
+# 4. Agent safety self-check (replaces old separate safety tool test)
 # ============================================================================
 
 
-class TestUnsafeResponseDetected:
-    """When answer_revelation_analyzer returns UNSAFE, verify the agent does
-    not blindly deliver the unsafe response."""
+class TestAgentSafetySelfCheck:
+    """The agent's prompt requires a SAFETY SELF-CHECK step. Verify the
+    prompt includes this and the workflow enforces it."""
 
-    @pytest.mark.asyncio
-    async def test_unsafe_response_triggers_regeneration(self):
-        """Agent should not deliver a response flagged UNSAFE.
+    def test_hint_workflow_has_safety_selfcheck(self):
+        """HINT workflow must include SAFETY SELF-CHECK step."""
+        builder = TutorAgent._create_prompt()
+        workflow_text = " ".join(fi.text for fi in builder.format_instructions)
+        assert "SAFETY SELF-CHECK" in workflow_text
+        assert "REQUIRED" in workflow_text
 
-        Interleaved sequence: planner → tool → planner → tool → planner → tool
-        → planner → tool → planner (9 calls total: 5 planner + 4 tool-internal).
-        """
-        concept_input = '{"mode": "CONCEPT_EXPLANATION", "concept": "momentum", "question": "What is momentum?", "topic": "physics"}'
-        unsafe_safety_input = '{"problem": "Calculate momentum", "correct_answer": "50 kg*m/s", "student_history": [], "proposed_response": "The answer is 50 kg*m/s."}'
-        safe_safety_input = '{"problem": "Calculate momentum", "correct_answer": "50 kg*m/s", "student_history": [], "proposed_response": "Think about what happens when you multiply mass by velocity."}'
+    def test_concept_workflow_has_safety_selfcheck(self):
+        """CONCEPT workflow must include SAFETY SELF-CHECK step."""
+        builder = TutorAgent._create_prompt()
+        workflow_text = " ".join(fi.text for fi in builder.format_instructions)
+        # Both workflows mention safety
+        assert workflow_text.count("SAFETY SELF-CHECK") >= 2
 
-        llm = SequenceMockLLM([
-            # 1. Planner: call socratic_hint_generator
-            _react_tool_call(
-                "Generating explanation.",
-                "socratic_hint_generator",
-                concept_input,
-            ),
-            # 2. Tool-internal: hint generator LLM call
-            "The answer is 50 kg*m/s when you multiply mass by velocity.",
-            # 3. Planner: call answer_revelation_analyzer
-            _react_tool_call(
-                "Checking safety.",
-                "answer_revelation_analyzer",
-                unsafe_safety_input,
-            ),
-            # 4. Tool-internal: safety tool LLM call (returns UNSAFE)
-            "VERDICT: UNSAFE\nREASONING: Reveals the answer directly.\n"
-            "STUDENT_ALREADY_ANSWERED: NO\nCONFIDENCE: High",
-            # 5. Planner: sees UNSAFE, regenerates
-            _react_tool_call(
-                "Response was UNSAFE. Regenerating safer version.",
-                "socratic_hint_generator",
-                concept_input,
-            ),
-            # 6. Tool-internal: hint generator LLM call (safer version)
-            "Think about what happens when you multiply mass by velocity.",
-            # 7. Planner: recheck safety
-            _react_tool_call(
-                "Rechecking safety.",
-                "answer_revelation_analyzer",
-                safe_safety_input,
-            ),
-            # 8. Tool-internal: safety tool LLM call (returns SAFE)
-            "VERDICT: SAFE\nREASONING: Guides without revealing.\n"
-            "STUDENT_ALREADY_ANSWERED: NO\nCONFIDENCE: High",
-            # 9. Planner: final answer
-            _react_final_answer(
-                "Safe now. Delivering.",
-                "Think about what happens when you multiply mass by velocity.",
-            ),
-        ])
-
-        agent = _build_agent(llm)
-        result = await agent.arun(
-            "PREPROCESSOR DETECTED MODE: CONCEPT_EXPLANATION\n"
-            "Safety check REQUIRED.\n\n"
-            "PROBLEM: Calculate momentum\nSTUDENT WORK: What is momentum?\nTOPIC: physics"
-        )
-
-        # The agent didn't deliver "The answer is 50"
-        assert "the answer is 50" not in result.lower()
-        assert llm.call_count == 9
+    def test_examples_demonstrate_safety_check(self):
+        """Both examples must show the agent performing a safety check."""
+        builder = TutorAgent._create_prompt()
+        for example in builder.examples:
+            assert "SAFETY CHECK" in example.text or "SAFE" in example.text, (
+                f"Example missing safety check: {example.text[:80]}"
+            )
 
 
 # ============================================================================
@@ -319,18 +253,10 @@ class TestProcessStudentWorkPreprocessor:
     @pytest.mark.asyncio
     async def test_hint_mode_has_safety_required(self):
         """HINT mode should include 'Safety check REQUIRED.'"""
-        llm = SequenceMockLLM([
-            _react_final_answer("Responding.", "Here is your hint."),
-        ])
-
-        agent = _build_agent(llm)
-
-        # Directly test the preprocessor logic from main.py
         student_work = "I got x = 7"
         detected_mode = TutorAgent.detect_mode(student_work)
         assert detected_mode == "HINT"
 
-        # Build the request as main.py does
         request = f"PROBLEM: Solve 2x+3=15\n\nSTUDENT WORK: {student_work}\n\nTOPIC: algebra"
         if detected_mode:
             prefix = f"PREPROCESSOR DETECTED MODE: {detected_mode}"
@@ -362,7 +288,6 @@ class TestProcessStudentWorkPreprocessor:
         assert detected_mode == "CONCEPT_EXPLANATION"
         assert TutorAgent.has_answer_content(student_work) is False
 
-        # Under old code this would NOT have safety required — now it always does
         request = f"PROBLEM: Music theory\n\nSTUDENT WORK: {student_work}\n\nTOPIC: music"
         if detected_mode:
             prefix = f"PREPROCESSOR DETECTED MODE: {detected_mode}"
@@ -373,168 +298,84 @@ class TestProcessStudentWorkPreprocessor:
 
 
 # ============================================================================
-# 6. Retriever failure continues gracefully
+# 6. Retriever failure continues gracefully (via retrieve_course_materials)
 # ============================================================================
 
 
 class TestRetrieverFailureContinues:
-    """When the retriever raises, the diagnostic tool should return analysis
-    without course context (not crash)."""
+    """When the retriever raises, retrieve_course_materials should return
+    a graceful message (not crash)."""
 
-    def test_retriever_failure_in_diagnostic_tool(self):
-        """StudentWorkAnalyzerTool continues with empty context when retriever fails."""
-        from tools.diagnostic_tools import StudentWorkAnalyzerTool
+    def test_retriever_failure_returns_message(self):
+        """RetrieveCourseMaterialsTool returns informative message on failure."""
+        from tools.retrieval_tools import RetrieveCourseMaterialsTool
 
-        llm = MockLLM(
-            "CORRECT_ASPECTS: Good setup\n"
-            "ERROR_IDENTIFIED: Division error\n"
-            "ROOT_MISCONCEPTION: Arithmetic\n"
-            "SEVERITY: Minor\n"
-            "SUGGESTED_FOCUS: Division\n"
-            "EVIDENCE: x=7 instead of x=6"
+        tool = RetrieveCourseMaterialsTool(FailingMockRetriever())
+        result = tool.use('{"query": "anything"}')
+
+        assert "No course materials found" in result
+        assert "unavailable" in result
+
+    @pytest.mark.asyncio
+    async def test_agent_continues_after_retriever_failure(self):
+        """Agent still produces a response when retriever fails."""
+        llm = SequenceMockLLM([
+            # 1. Planner: retrieve (will fail gracefully)
+            _react_tool_call(
+                "Getting context.",
+                "retrieve_course_materials",
+                '{"query": "algebra"}',
+            ),
+            # 2. Planner: continues despite retrieval failure
+            _react_final_answer(
+                "No materials available, but I can still help. "
+                "SAFETY CHECK: Guiding question only. SAFE.",
+                "Let's think about this step by step. What operation "
+                "would you use to isolate x?",
+            ),
+        ])
+
+        agent = _build_agent(llm, FailingMockRetriever())
+        result = await agent.arun(
+            "PROBLEM: Solve x+1=2\nSTUDENT WORK: x=0\nTOPIC: algebra"
         )
-        tool = StudentWorkAnalyzerTool(llm, FailingMockRetriever())
 
-        result = tool.use(build_json_input(
-            DiagnosticInput,
-            problem="Solve 2x+3=15",
-            student_work="x=7",
-            topic="algebra",
-        ))
-
-        # Should NOT crash — should return analysis with "No specific course materials"
-        assert "ANALYSIS COMPLETE" in result
-        assert "Minor" in result
-
-    def test_retriever_failure_in_hint_generator(self):
-        """SocraticHintGeneratorTool continues when retriever fails during hint gen."""
-        from tools.pedagogical_tools import SocraticHintGeneratorTool
-
-        llm = MockLLM("Check your division step carefully.")
-        tool = SocraticHintGeneratorTool(llm, FailingMockRetriever())
-
-        result = tool.use(build_json_input(
-            HintInput,
-            mode=InteractionMode.HINT,
-            problem="Solve 2x+3=15",
-            student_work="x=7",
-            misconception="division error",
-            severity=Severity.MINOR,
-            topic="algebra",
-        ))
-
-        assert "COMPLETE HINT" in result
-        assert "division" in result.lower()
-
-    def test_retriever_failure_in_concept_explanation(self):
-        """SocraticHintGeneratorTool continues when retriever fails during concept mode."""
-        from tools.pedagogical_tools import SocraticHintGeneratorTool
-
-        llm = MockLLM("Momentum is the product of mass and velocity.")
-        tool = SocraticHintGeneratorTool(llm, FailingMockRetriever())
-
-        result = tool.use(build_json_input(
-            HintInput,
-            mode=InteractionMode.CONCEPT_EXPLANATION,
-            concept="momentum",
-            question="What is momentum?",
-            topic="physics",
-        ))
-
-        assert "CONCEPT EXPLANATION" in result
-        assert "momentum" in result.lower()
+        assert llm.call_count == 2
+        assert len(result) > 0
 
 
 # ============================================================================
-# 7. LLM failure in tools returns structured error
+# 7. Student already answered correctly — check_student_history integration
 # ============================================================================
 
 
-class TestLLMFailureInTools:
-    """When a tool's internal LLM call fails, verify structured error strings."""
+class TestStudentAlreadyAnswered:
+    """When check_student_history returns YES, the agent can confirm."""
 
-    def test_concept_explanation_llm_failure(self):
-        """Concept explanation returns structured error on LLM failure."""
-        from tools.pedagogical_tools import SocraticHintGeneratorTool
+    @pytest.mark.asyncio
+    async def test_student_answered_correctly(self):
+        """Agent can confirm when student already gave correct answer."""
+        llm = SequenceMockLLM([
+            # 1. Check history
+            _react_tool_call(
+                "Checking if student already answered.",
+                "check_student_history",
+                '{"correct_answer": "x = 6", "student_history": ["I got x = 6"]}',
+            ),
+            # 2. Final answer — can confirm since student already said it
+            _react_final_answer(
+                "Student already answered correctly (x=6). I can confirm. SAFE.",
+                "Excellent work! Your answer x = 6 is correct. You correctly "
+                "isolated x by subtracting 3 and dividing by 2.",
+            ),
+        ])
 
-        tool = SocraticHintGeneratorTool(FailingMockLLM(), MockRetriever())
+        agent = _build_agent(llm)
+        result = await agent.arun(
+            "PREPROCESSOR DETECTED MODE: HINT\n\n"
+            "PROBLEM: Solve 2x+3=15\nSTUDENT WORK: I got x = 6\n"
+            "TOPIC: algebra\nCORRECT ANSWER: x = 6"
+        )
 
-        result = tool.use(build_json_input(
-            HintInput,
-            mode=InteractionMode.CONCEPT_EXPLANATION,
-            concept="momentum",
-            question="What is momentum?",
-            topic="physics",
-        ))
-
-        assert "ERROR" in result
-        assert "Concept explanation generation failed" in result
-
-    def test_hint_generation_llm_failure(self):
-        """Hint generation returns structured error on LLM failure."""
-        from tools.pedagogical_tools import SocraticHintGeneratorTool
-
-        tool = SocraticHintGeneratorTool(FailingMockLLM(), MockRetriever())
-
-        result = tool.use(build_json_input(
-            HintInput,
-            mode=InteractionMode.HINT,
-            problem="Solve 2x+3=15",
-            student_work="x=7",
-            misconception="division error",
-            severity=Severity.MINOR,
-            topic="algebra",
-        ))
-
-        assert "ERROR" in result
-        assert "Hint generation failed" in result
-
-    def test_success_response_llm_failure(self):
-        """Success response returns structured error on LLM failure."""
-        from tools.pedagogical_tools import SocraticHintGeneratorTool
-
-        tool = SocraticHintGeneratorTool(FailingMockLLM(), MockRetriever())
-
-        result = tool.use(build_json_input(
-            HintInput,
-            mode=InteractionMode.HINT,
-            problem="Solve 2x+3=15",
-            student_work="x=6",
-            misconception="none - student is correct",
-            severity=Severity.MINOR,
-            topic="algebra",
-        ))
-
-        assert "ERROR" in result
-        assert "Success response generation failed" in result
-
-
-# ============================================================================
-# 8. Prompt text verification
-# ============================================================================
-
-
-class TestPromptSafetyRequirement:
-    """Verify the CONCEPT_EXPLANATION workflow in the prompt now requires safety."""
-
-    def test_concept_workflow_requires_safety(self):
-        """CONCEPT_EXPLANATION workflow must include REQUIRED safety check."""
-        builder = TutorAgent._create_prompt()
-        workflow_text = " ".join(fi.text for fi in builder.format_instructions)
-
-        # Find the CONCEPT_EXPLANATION workflow section
-        assert "CONCEPT_EXPLANATION" in workflow_text
-        # The workflow should mention answer_revelation_analyzer as REQUIRED
-        assert "answer_revelation_analyzer" in workflow_text
-
-        # Old optional language should be gone
-        assert "If the PREPROCESSOR WARNING" not in workflow_text
-
-    def test_concept_example_includes_safety_tool(self):
-        """CONCEPT_EXPLANATION example must show answer_revelation_analyzer being called."""
-        builder = TutorAgent._create_prompt()
-        # The second example is CONCEPT_EXPLANATION
-        concept_example = builder.examples[1].text
-        assert "answer_revelation_analyzer" in concept_example
-        # Old "no specific answer to reveal" phrasing should be gone
-        assert "no specific answer to reveal" not in concept_example
+        assert "correct" in result.lower()
+        assert llm.call_count == 2

@@ -1,7 +1,7 @@
-"""Pydantic I/O models for all tutor tools.
+"""Pydantic I/O models for tutor tools.
 
-These models replace the brittle '|||'-delimited string parsing.
-Tools still use str->str (framework constraint) but encode/decode JSON.
+All tools use str->str (framework constraint) but encode/decode JSON
+via these models for structured validation.
 """
 
 from enum import Enum
@@ -9,6 +9,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel
 
+
+# --- Shared enums (used by agent prompt, mode detection, etc.) ---
 
 class InteractionMode(str, Enum):
     HINT = "HINT"
@@ -26,56 +28,18 @@ class SafetyVerdict(str, Enum):
     UNSAFE = "UNSAFE"
 
 
-# --- Diagnostic Tool I/O ---
+# --- Computational tool I/O ---
 
-class DiagnosticInput(BaseModel):
-    problem: str
-    student_work: str
-    topic: str
-
-
-class DiagnosticOutput(BaseModel):
-    correct_aspects: str
-    error_identified: str
-    root_misconception: str
-    severity: Severity
-    suggested_focus: str
-    evidence: str
+class RetrievalInput(BaseModel):
+    query: str
+    top_k: int = 3
 
 
-# --- Safety Tool I/O ---
-
-class SafetyInput(BaseModel):
-    problem: str
+class HistoryCheckInput(BaseModel):
     correct_answer: str
     student_history: List[str] = []
-    proposed_response: str
 
 
-class SafetyOutput(BaseModel):
-    verdict: SafetyVerdict
-    reasoning: str
-    student_already_answered: bool = False
-    confidence: str = "High"
-
-
-# --- Hint/Concept Tool I/O ---
-
-class HintInput(BaseModel):
-    mode: InteractionMode
-    topic: str = ""
-    # HINT mode fields
-    problem: str = ""
-    student_work: str = ""
-    misconception: str = ""
-    severity: Severity = Severity.MAJOR
-    hint_level: Optional[int] = None
-    # CONCEPT mode fields
-    concept: str = ""
-    question: str = ""
-
-
-class HintOutput(BaseModel):
-    hint_text: str
-    hint_level: Optional[int] = None
-    mode: InteractionMode
+class HintLevelInput(BaseModel):
+    severity: str = "Major"
+    hint_level_override: Optional[int] = None

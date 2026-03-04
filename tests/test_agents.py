@@ -52,15 +52,27 @@ class TestTutorAgentCreation:
         agent = TutorAgent.create(MockLLM(), WorkingMemory(), MockRetriever())
         assert isinstance(agent.tool_executor, ToolExecutor)
 
-    def test_has_all_three_tools(self):
+    def test_has_all_four_tools(self):
         from fairlib import WorkingMemory
         from agents.tutor_agent import TutorAgent
 
         agent = TutorAgent.create(MockLLM(), WorkingMemory(), MockRetriever())
         tool_names = set(agent.tool_executor.tool_registry.get_all_tools().keys())
-        assert "student_work_analyzer" in tool_names
-        assert "socratic_hint_generator" in tool_names
-        assert "answer_revelation_analyzer" in tool_names
+        assert "retrieve_course_materials" in tool_names
+        assert "check_student_history" in tool_names
+        assert "get_hint_level" in tool_names
+        assert "safe_calculator" in tool_names
+
+    def test_no_llm_wrapper_tools(self):
+        """Old LLM-wrapper tools must not be registered."""
+        from fairlib import WorkingMemory
+        from agents.tutor_agent import TutorAgent
+
+        agent = TutorAgent.create(MockLLM(), WorkingMemory(), MockRetriever())
+        tool_names = set(agent.tool_executor.tool_registry.get_all_tools().keys())
+        assert "student_work_analyzer" not in tool_names
+        assert "socratic_hint_generator" not in tool_names
+        assert "answer_revelation_analyzer" not in tool_names
 
     def test_has_role_description(self):
         from fairlib import WorkingMemory
@@ -95,6 +107,18 @@ class TestTutorAgentPrompt:
         role_text = builder.role_definition.text.lower()
         assert "directly" in role_text or "second person" in role_text
 
+    def test_role_mentions_agent_is_reasoner(self):
+        """Agent prompt must say the agent reasons itself (not tools)."""
+        builder = self._get_prompt()
+        role_text = builder.role_definition.text.lower()
+        assert "diagnostician" in role_text or "your role" in role_text.lower()
+
+    def test_role_mentions_computational_tools(self):
+        """Tools are described as data/computation, not LLM reasoning."""
+        builder = self._get_prompt()
+        role_text = builder.role_definition.text.lower()
+        assert "computational" in role_text or "data" in role_text
+
     def test_has_format_instructions(self):
         builder = self._get_prompt()
         assert len(builder.format_instructions) >= 2
@@ -121,7 +145,7 @@ class TestTutorAgentPrompt:
         assert has_non_stem, "Examples should include non-STEM domains"
 
     def test_no_old_agent_names_in_prompt(self):
-        """Old multi-agent names must not appear in the prompt."""
+        """Old multi-agent names and LLM-wrapper tool names must not appear."""
         builder = self._get_prompt()
 
         all_text = builder.role_definition.text
@@ -129,9 +153,11 @@ class TestTutorAgentPrompt:
         all_text += " ".join(e.text for e in builder.examples)
 
         for old_name in ["SafetyGuard", "MisconceptionDetector",
-                         "HintGenerator", "delegate"]:
+                         "HintGenerator", "delegate",
+                         "student_work_analyzer", "socratic_hint_generator",
+                         "answer_revelation_analyzer"]:
             assert old_name not in all_text, (
-                f"Old agent name '{old_name}' found in prompt"
+                f"Old name '{old_name}' found in prompt"
             )
 
     def test_all_tool_names_referenced(self):
@@ -140,8 +166,20 @@ class TestTutorAgentPrompt:
         all_text += " ".join(fi.text for fi in builder.format_instructions)
         all_text += " ".join(e.text for e in builder.examples)
 
-        for tool_name in ["student_work_analyzer", "socratic_hint_generator",
-                          "answer_revelation_analyzer"]:
+        for tool_name in ["retrieve_course_materials", "check_student_history",
+                          "get_hint_level", "safe_calculator"]:
             assert tool_name in all_text, (
                 f"Tool name '{tool_name}' not found in prompt"
             )
+
+    def test_safety_self_check_in_workflow(self):
+        """Workflow must include safety self-check step."""
+        builder = self._get_prompt()
+        workflow_text = " ".join(fi.text for fi in builder.format_instructions)
+        assert "SAFETY SELF-CHECK" in workflow_text
+
+    def test_examples_show_safety_check(self):
+        """Examples must demonstrate the safety self-check."""
+        builder = self._get_prompt()
+        all_example_text = " ".join(e.text for e in builder.examples)
+        assert "SAFETY CHECK" in all_example_text or "SAFE" in all_example_text
