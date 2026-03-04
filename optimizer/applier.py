@@ -7,16 +7,14 @@ test suite, and commits or reverts.
 import logging
 import py_compile
 import subprocess
-import tempfile
 from pathlib import Path
 
-from optimizer.config import OptimizerConfig
 from optimizer.proposer import Proposal
 
 logger = logging.getLogger(__name__)
 
 
-def _run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+def run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git"] + list(args),
         capture_output=True, text=True, check=check,
@@ -24,7 +22,7 @@ def _run_git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
 
 
 def get_current_branch() -> str:
-    result = _run_git("rev-parse", "--abbrev-ref", "HEAD")
+    result = run_git("rev-parse", "--abbrev-ref", "HEAD")
     return result.stdout.strip()
 
 
@@ -34,7 +32,7 @@ def create_iteration_branch(iteration: int) -> str:
     Returns the branch name.
     """
     branch = f"optimizer/iter-{iteration:03d}"
-    _run_git("checkout", "-b", branch)
+    run_git("checkout", "-b", branch)
     logger.info("Created branch %s", branch)
     return branch
 
@@ -118,7 +116,7 @@ def commit_changes(proposal: Proposal, iteration: int) -> bool:
     """
     files = list({c.file_path for c in proposal.changes})
     for f in files:
-        _run_git("add", f)
+        run_git("add", f)
 
     msg = (
         f"optimizer: iteration {iteration}\n\n"
@@ -126,7 +124,7 @@ def commit_changes(proposal: Proposal, iteration: int) -> bool:
         f"Expected impact: {proposal.expected_impact}\n"
         f"Risk: {proposal.risk_assessment}"
     )
-    result = _run_git("commit", "-m", msg, check=False)
+    result = run_git("commit", "-m", msg, check=False)
     if result.returncode != 0:
         logger.error("Commit failed: %s", result.stderr)
         return False
@@ -136,6 +134,6 @@ def commit_changes(proposal: Proposal, iteration: int) -> bool:
 
 def revert_and_return(original_branch: str) -> None:
     """Discard uncommitted changes and switch back to the given branch."""
-    _run_git("checkout", "--", ".", check=False)
-    _run_git("checkout", original_branch, check=False)
+    run_git("checkout", "--", ".", check=False)
+    run_git("checkout", original_branch, check=False)
     logger.info("Reverted to %s", original_branch)

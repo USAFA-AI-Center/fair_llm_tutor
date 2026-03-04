@@ -20,6 +20,7 @@ from optimizer.applier import (
     create_iteration_branch,
     get_current_branch,
     revert_and_return,
+    run_git,
     run_tests,
 )
 from optimizer.config import OptimizerConfig
@@ -68,8 +69,7 @@ def run_iteration(
 
     # If a previous iteration improved things, start from that branch
     if best_branch:
-        from optimizer.applier import _run_git
-        _run_git("checkout", best_branch, check=False)
+        run_git("checkout", best_branch, check=False)
 
     # ── Step 1: Get current scores for context ──────────────────────
     # Use the best known scores to inform the proposer.
@@ -139,11 +139,9 @@ def run_iteration(
     # ── Step 3: Create branch and apply changes ─────────────────────
     # Go back to the best branch before creating the iteration branch
     if best_branch:
-        from optimizer.applier import _run_git
-        _run_git("checkout", best_branch, check=False)
+        run_git("checkout", best_branch, check=False)
     else:
-        from optimizer.applier import _run_git
-        _run_git("checkout", original_branch, check=False)
+        run_git("checkout", original_branch, check=False)
 
     branch = create_iteration_branch(iteration)
     success, errors = apply_changes(proposal)
@@ -323,8 +321,7 @@ def main():
     print(f"  Runs:            {config.runs_dir}/")
 
     # Return to original branch
-    from optimizer.applier import _run_git
-    _run_git("checkout", original_branch, check=False)
+    run_git("checkout", original_branch, check=False)
 
 
 if __name__ == "__main__":

@@ -2,11 +2,14 @@
 
 import logging
 
+from pydantic import ValidationError
+
 from fairlib.core.interfaces.tools import AbstractTool
 from fairlib.core.interfaces.llm import AbstractChatModel
 from fairlib.core.message import Message
 from fairlib.core.interfaces.memory import AbstractRetriever
 
+from tools.sanitize import UNTRUSTED_PREAMBLE, wrap_untrusted
 from tools.schemas import DiagnosticInput
 
 logger = logging.getLogger(__name__)
@@ -36,7 +39,7 @@ class StudentWorkAnalyzerTool(AbstractTool):
         try:
             try:
                 inp = DiagnosticInput.model_validate_json(tool_input)
-            except Exception:
+            except (ValueError, ValidationError):
                 return (
                     'ERROR: Invalid JSON input. Expected: '
                     '{"problem": "...", "student_work": "...", "topic": "..."}'
@@ -63,11 +66,13 @@ class StudentWorkAnalyzerTool(AbstractTool):
                 for i, doc in enumerate(relevant_docs)
             ]) if relevant_docs else "No specific course materials found."
 
-            analysis_prompt = f"""You are an expert at diagnosing student misconceptions. Analyze the student's work to identify the SPECIFIC conceptual error.
+            analysis_prompt = f"""{UNTRUSTED_PREAMBLE}
 
-PROBLEM: {inp.problem}
+You are an expert at diagnosing student misconceptions. Analyze the student's work to identify the SPECIFIC conceptual error.
 
-STUDENT'S WORK: {inp.student_work}
+PROBLEM: {wrap_untrusted(inp.problem)}
+
+STUDENT'S WORK: {wrap_untrusted(inp.student_work)}
 
 RELEVANT COURSE MATERIALS:
 {course_context}

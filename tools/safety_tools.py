@@ -2,10 +2,13 @@
 
 import logging
 
+from pydantic import ValidationError
+
 from fairlib.core.interfaces.tools import AbstractTool
 from fairlib.core.interfaces.llm import AbstractChatModel
 from fairlib.core.message import Message
 
+from tools.sanitize import UNTRUSTED_PREAMBLE, wrap_untrusted
 from tools.schemas import SafetyInput
 
 logger = logging.getLogger(__name__)
@@ -36,7 +39,7 @@ class AnswerRevelationAnalyzerTool(AbstractTool):
         try:
             try:
                 inp = SafetyInput.model_validate_json(tool_input)
-            except Exception:
+            except (ValueError, ValidationError):
                 return (
                     'ERROR: Invalid JSON input. Expected: '
                     '{"problem": "...", "correct_answer": "...", '
@@ -60,22 +63,24 @@ class AnswerRevelationAnalyzerTool(AbstractTool):
 
             # Create reasoning prompt for LLM with history context
             history_desc = (
-                f"The student has already provided these answers: {inp.student_history}"
+                f"The student has already provided these answers: {wrap_untrusted('; '.join(inp.student_history))}"
                 if inp.student_history
                 else "The student has not provided any answers yet."
             )
 
-            analysis_prompt = f"""You are a safety validator for a tutoring system. Your job is to determine if a proposed response reveals the answer to a problem.
+            analysis_prompt = f"""{UNTRUSTED_PREAMBLE}
+
+You are a safety validator for a tutoring system. Your job is to determine if a proposed response reveals the answer to a problem.
 
 IMPORTANT CONTEXT - STUDENT HISTORY:
 {history_desc}
 Student already stated the correct answer: {"YES" if student_already_answered else "NO"}
 
-PROBLEM: {inp.problem}
+PROBLEM: {wrap_untrusted(inp.problem)}
 
 CORRECT ANSWER (for your reference only): {inp.correct_answer}
 
-PROPOSED RESPONSE TO VALIDATE: {inp.proposed_response}
+PROPOSED RESPONSE TO VALIDATE: {wrap_untrusted(inp.proposed_response)}
 
 CRITICAL RULE:
 If the student has ALREADY stated the correct answer in their history, then it is SAFE to:
@@ -126,8 +131,10 @@ CONFIDENCE: [High, Medium, or Low]"""
             return f"ERROR: Analysis failed. {str(e)}"
 
     def _extract_verdict(self, llm_response: str, student_already_answered: bool) -> str:
-        """
-        Extract verdict from LLM response, considering student history.
+        """Extract verdict from LLM response, considering student history.
+
+        Returns ``"SAFE"`` or ``"UNSAFE"``. Defaults to ``"UNSAFE"`` when
+        the verdict cannot be determined (conservative).
         """
         for line in llm_response.split("\n"):
             if "VERDICT:" in line.upper():

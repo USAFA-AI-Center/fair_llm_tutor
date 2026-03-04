@@ -1,12 +1,16 @@
 # pedagogical_tools.py
 
 import logging
+from typing import Optional
+
+from pydantic import ValidationError
 
 from fairlib.core.interfaces.tools import AbstractTool
 from fairlib.core.interfaces.llm import AbstractChatModel
 from fairlib.core.interfaces.memory import AbstractRetriever
 from fairlib.core.message import Message
 
+from tools.sanitize import UNTRUSTED_PREAMBLE, wrap_untrusted
 from tools.schemas import HintInput, InteractionMode
 
 logger = logging.getLogger(__name__)
@@ -34,7 +38,7 @@ class SocraticHintGeneratorTool(AbstractTool):
 
         try:
             inp = HintInput.model_validate_json(tool_input)
-        except Exception:
+        except (ValueError, ValidationError):
             return (
                 'ERROR: Invalid JSON input. Expected: '
                 '{"mode": "HINT", "problem": "...", "student_work": "...", '
@@ -87,11 +91,13 @@ class SocraticHintGeneratorTool(AbstractTool):
                 logger.warning("Failed to retrieve docs for concept explanation", exc_info=True)
                 relevant_docs = ""
 
-        prompt = f"""You are a helpful tutor providing a clear concept explanation.
+        prompt = f"""{UNTRUSTED_PREAMBLE}
 
-STUDENT QUESTION: {question}
-CONCEPT TO EXPLAIN: {concept}
-SUBJECT AREA: {topic}
+You are a helpful tutor providing a clear concept explanation.
+
+STUDENT QUESTION: {wrap_untrusted(question)}
+CONCEPT TO EXPLAIN: {wrap_untrusted(concept)}
+SUBJECT AREA: {wrap_untrusted(topic)}
 
 COURSE MATERIALS:
 {relevant_docs if relevant_docs else 'No specific materials available.'}
@@ -129,7 +135,7 @@ Focus on conceptual understanding.
         misconception: str,
         severity: str,
         topic: str,
-        hint_level_override: int = None
+        hint_level_override: Optional[int] = None
     ) -> str:
         """
         Generate Socratic hints for student work.
@@ -197,11 +203,13 @@ Focus on conceptual understanding.
     def _generate_success_response(self, problem: str, student_work: str, topic: str) -> str:
         """Generate response when student got the answer correct"""
 
-        prompt = f"""The student has correctly solved this problem. Generate an encouraging response.
+        prompt = f"""{UNTRUSTED_PREAMBLE}
 
-PROBLEM: {problem}
-STUDENT'S CORRECT WORK: {student_work}
-TOPIC: {topic}
+The student has correctly solved this problem. Generate an encouraging response.
+
+PROBLEM: {wrap_untrusted(problem)}
+STUDENT'S CORRECT WORK: {wrap_untrusted(student_work)}
+TOPIC: {wrap_untrusted(topic)}
 
 Create a response that:
 1. Confirms they are correct
@@ -240,14 +248,16 @@ Create a response that:
             4: "Directed guidance - specific about what to check"
         }
 
-        return f"""You are a Socratic tutor creating a hint for a student.
+        return f"""{UNTRUSTED_PREAMBLE}
+
+You are a Socratic tutor creating a hint for a student.
 
 CONTEXT:
-Problem: {problem}
-Student's Work: {student_work}
-Identified Misconception: {misconception}
+Problem: {wrap_untrusted(problem)}
+Student's Work: {wrap_untrusted(student_work)}
+Identified Misconception: {wrap_untrusted(misconception)}
 Severity: {severity}
-Topic: {topic}
+Topic: {wrap_untrusted(topic)}
 
 COURSE MATERIALS (for context):
 {course_materials if course_materials else 'No additional materials'}

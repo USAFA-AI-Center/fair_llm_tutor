@@ -25,7 +25,7 @@ import logging
 import sys
 import argparse
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 try:
     import chromadb
@@ -59,7 +59,7 @@ class TutorSession:
     """
 
     def __init__(self, course_materials_path: str, problems_file: str = "",
-                 config: TutorConfig = None):
+                 config: Optional[TutorConfig] = None):
         """
         Initialize the tutor system.
 
@@ -265,7 +265,7 @@ class TutorSession:
                 break
             except Exception as e:
                 logger.error(f"Error during tutoring: {e}", exc_info=True)
-                print(f"\nError processing your input. Please try again.")
+                print("\nError processing your input. Please try again.")
 
 
 async def main():

@@ -1,7 +1,6 @@
 """Configuration for the self-improving optimizer loop."""
 
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 
 # Scenarios covering HINT + CONCEPT_EXPLANATION modes, STEM + non-STEM,

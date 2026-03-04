@@ -3,7 +3,7 @@
 import re
 
 from fairlib.modules.agent.simple_agent import SimpleAgent
-from fairlib.modules.planning.react_planner import ReActPlanner, SimpleReActPlanner
+from fairlib.modules.planning.react_planner import SimpleReActPlanner
 from fairlib.modules.action.executor import ToolExecutor
 from fairlib.modules.action.tools.registry import ToolRegistry
 from fairlib.core.interfaces.llm import AbstractChatModel

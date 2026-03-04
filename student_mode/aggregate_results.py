@@ -140,7 +140,7 @@ def print_aggregate_summary(sessions: list[dict]) -> None:
         by_topic[s["topic"]].append(s)
 
     if len(by_topic) > 1:
-        print(f"\n  By topic:")
+        print("\n  By topic:")
         for topic, topic_sessions in sorted(by_topic.items()):
             topic_turns = sum(s["work_turns"] for s in topic_sessions)
             topic_latency = sum(s["total_latency_ms"] for s in topic_sessions)

@@ -11,9 +11,9 @@ Supports loading from:
 
 import os
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class TutorConfig:
         """Load config with environment variable overrides."""
         config = cls()
 
-        env_map = {
+        env_map: dict[str, tuple[str, Callable[[str], Any]]] = {
             "FAIR_LLM_MODEL_NAME": ("model_name", str),
             "FAIR_LLM_MAX_NEW_TOKENS": ("max_new_tokens", int),
             "FAIR_LLM_QUANTIZED": ("quantized", lambda v: v.lower() in ("true", "1", "yes")),

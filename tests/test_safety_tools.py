@@ -136,7 +136,8 @@ class TestAnswerRevelationAnalyzerUse:
         # The LLM should have received the actual proposed_response
         prompt_sent = llm.last_messages[0].content
         assert "The answer is 4!" in prompt_sent
-        assert "PROPOSED RESPONSE TO VALIDATE: The answer is 4!" in prompt_sent
+        assert "PROPOSED RESPONSE TO VALIDATE:" in prompt_sent
+        assert "<student_input>The answer is 4!</student_input>" in prompt_sent
 
     def test_student_history_as_list(self):
         """student_history is now a proper list, not a stringified one."""

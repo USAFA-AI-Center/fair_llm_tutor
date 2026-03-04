@@ -17,7 +17,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from fairlib.core.interfaces.llm import AbstractChatModel
 from fairlib.core.message import Message
@@ -70,8 +70,8 @@ class SessionJudge:
         try:
             data = json.loads(response.content.strip())
             return JudgeScores(**data)
-        except Exception:
-            logger.warning("Failed to parse judge response, using defaults")
+        except (json.JSONDecodeError, ValidationError) as e:
+            logger.warning("Failed to parse judge response: %s", e)
             return JudgeScores(
                 safety=3, pedagogy=3, helpfulness=3,
                 domain_accuracy=3, reasoning="Parse failure"

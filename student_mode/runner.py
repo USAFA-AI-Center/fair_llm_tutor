@@ -45,9 +45,9 @@ from dotenv import load_dotenv
 # Load .env from project root (for ANTHROPIC_API_KEY, etc.)
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from student_mode.persona import AUTONOMOUS_SESSION_CONFIG
-from student_mode.scenarios import SCENARIOS, scenario_names
-from student_mode.student import (
+from student_mode.persona import AUTONOMOUS_SESSION_CONFIG  # noqa: E402
+from student_mode.scenarios import SCENARIOS, scenario_names  # noqa: E402
+from student_mode.student import (  # noqa: E402
     build_student_llm,
     generate_response_deterministic,
     generate_response_llm,
@@ -126,20 +126,24 @@ def run_session(
         logger.info(f"Initializing student LLM: {student_llm_provider}/{student_llm_model}")
         student_llm = build_student_llm(student_llm_provider, student_llm_model)
 
-    # Build the tutor command
-    cmd = f"python main.py --course_materials {course_materials} --log-level {log_level}"
+    # Build the tutor command as a list to avoid shell injection
+    course_path = Path(course_materials)
+    if ".." in course_path.parts or course_path.is_absolute():
+        raise ValueError(f"Invalid course_materials path: {course_materials}")
+    cmd_list = ["python", "main.py", "--course_materials", course_materials, "--log-level", log_level]
     if tutor_config:
-        cmd += f" --config {tutor_config}"
+        cmd_list.extend(["--config", tutor_config])
 
     project_dir = str(Path(__file__).resolve().parent.parent)
     stderr_path = output_path.replace(".jsonl", ".stderr.log")
     records = []
     turn = 0
 
-    print(f"[session {session_id}] Starting tutor: {cmd}")
+    student_label = f"LLM ({student_llm_provider})" if student_llm else "deterministic"
+    print(f"[session {session_id}] Starting tutor: {' '.join(cmd_list)}")
     print(f"[session {session_id}] Output: {output_path}")
     print(f"[session {session_id}] Stderr: {stderr_path}")
-    print(f"[session {session_id}] Student: {'LLM (' + student_llm_provider + ')' if student_llm else 'deterministic'}")
+    print(f"[session {session_id}] Student: {student_label}")
     print(f"[session {session_id}] Turns: {min_turns}-{max_turns}")
     print()
 
@@ -149,7 +153,7 @@ def run_session(
     # would swallow the "You: " prompt and break pexpect matching.
     # Instead we capture the full PTY output via logfile_read and extract
     # log-formatted lines (HH:MM:SS [module] LEVEL: ...) after each turn.
-    child = pexpect.spawn(cmd, encoding="utf-8", timeout=timeout, cwd=project_dir)
+    child = pexpect.spawn(cmd_list[0], args=cmd_list[1:], encoding="utf-8", timeout=timeout, cwd=project_dir)
 
     _stderr_fh = open(stderr_path, "w", encoding="utf-8")
     child.logfile_read = _stderr_fh
@@ -228,7 +232,6 @@ def run_session(
 
             # Send to tutor and capture response
             turn += 1
-            timestamp = datetime.now(timezone.utc).isoformat()
             start_time = time.monotonic()
 
             # Collapse newlines to spaces — input() splits on \n, causing
@@ -289,15 +292,6 @@ def run_session(
                 for issue in turn_issues:
                     print(f"           WARNING: [{issue['type']}] {issue['detail']}")
 
-            # Check if we should stop (after min_turns)
-            if student_turns >= min_turns:
-                # LLM mode: let the LLM decide when the student is satisfied
-                # Deterministic mode: stop at max_turns
-                if not student_llm and student_turns >= max_turns:
-                    break
-                # In LLM mode, stop if the student seems satisfied or max hit
-                if student_llm and student_turns >= max_turns:
-                    break
 
         # ── End session ──────────────────────────────────────────────────
         turn += 1
@@ -366,7 +360,7 @@ def run_session(
     }
 
     print(f"\n{'=' * 60}")
-    print(f"SESSION SUMMARY")
+    print("SESSION SUMMARY")
     print(f"{'=' * 60}")
     print(f"  Session ID:     {session_id}")
     print(f"  JSONL output:   {output_path}")

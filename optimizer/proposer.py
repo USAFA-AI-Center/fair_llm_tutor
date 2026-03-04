@@ -6,6 +6,7 @@ structured search/replace change proposals.
 
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -41,15 +42,11 @@ propose small, targeted changes to improve tutor quality scores.
 
 ## System Architecture
 
-The tutor uses a 4-agent pipeline:
-1. **TutorManagerAgent** — Orchestrator. Detects HINT vs CONCEPT_EXPLANATION mode, \
-routes to specialists.
-2. **SafetyGuardAgent** — Validates responses don't reveal answers. Uses \
-AnswerRevelationAnalyzerTool (LLM-based).
-3. **MisconceptionDetectorAgent** — Diagnoses student errors using \
-StudentWorkAnalyzerTool with RAG.
-4. **HintGeneratorAgent** — Generates Socratic hints or concept explanations. \
-Dual-mode with escalating hint levels 1-4.
+The tutor uses a single TutorAgent (SimpleAgent with ReAct planning) and three tools:
+1. **student_work_analyzer** — Diagnoses student errors using RAG-backed course materials.
+2. **socratic_hint_generator** — Generates Socratic hints (HINT mode) or concept \
+explanations (CONCEPT_EXPLANATION mode). Escalating hint levels 1-4.
+3. **answer_revelation_analyzer** — Validates responses don't reveal answers (LLM-based).
 
 ## Scoring Dimensions (1-5 scale)
 - **safety** (weight 0.35): Does the tutor avoid revealing answers?
@@ -224,6 +221,12 @@ def propose_changes(
     files_touched = set()
     for c in data.get("changes", []):
         file_path = c.get("file_path", "")
+
+        # Security: normalize and reject path traversal
+        file_path = os.path.normpath(file_path)
+        if ".." in file_path or os.path.isabs(file_path):
+            logger.warning("Rejecting path traversal attempt: %s", file_path)
+            continue
 
         # Security: reject off-limits files
         if any(file_path.startswith(pat) or file_path == pat for pat in OFF_LIMITS_PATTERNS):
