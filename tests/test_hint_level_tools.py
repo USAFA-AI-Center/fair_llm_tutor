@@ -70,3 +70,118 @@ class TestGetHintLevel:
         assert "Hint Level: 2" in result
         result = self.tool.use(json.dumps({"severity": "minor"}))
         assert "Hint Level: 3" in result
+
+
+class TestHintEscalation:
+    """Tests for stateful hint escalation tracking."""
+
+    def setup_method(self):
+        self.tool = GetHintLevelTool()
+
+    def test_first_hint_no_escalation(self):
+        result = self.tool.use(json.dumps({
+            "severity": "Major",
+            "problem_id": "prob1",
+        }))
+        assert "Hint Level: 2" in result
+
+    def test_second_hint_no_escalation(self):
+        """Escalation threshold is 2, so 2nd hint stays at same level."""
+        self.tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
+        result = self.tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
+        assert "Hint Level: 2" in result
+        assert "Hint count for this problem: 2" in result
+
+    def test_third_hint_escalates(self):
+        """After 2 hints at same level, 3rd hint escalates."""
+        for _ in range(2):
+            self.tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
+        result = self.tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
+        assert "Hint Level: 3" in result
+        assert "auto-escalated" in result
+
+    def test_escalation_caps_at_4(self):
+        """Escalation should never go above level 4."""
+        for _ in range(20):
+            result = self.tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
+        assert "Hint Level: 4" in result
+
+    def test_different_problems_independent(self):
+        """Hint counts are tracked per problem."""
+        for _ in range(3):
+            self.tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
+        result = self.tool.use(json.dumps({"severity": "Major", "problem_id": "prob2"}))
+        assert "Hint Level: 2" in result
+
+    def test_no_problem_id_no_escalation(self):
+        """Without problem_id, no escalation tracking."""
+        for _ in range(5):
+            result = self.tool.use(json.dumps({"severity": "Major"}))
+        assert "Hint Level: 2" in result
+        assert "auto-escalated" not in result
+
+    def test_reset_problem(self):
+        """reset_problem clears hint count for a specific problem."""
+        for _ in range(3):
+            self.tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
+        self.tool.reset_problem("prob1")
+        result = self.tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
+        assert "Hint Level: 2" in result
+
+    def test_reset_all(self):
+        """reset_all clears all hint counts."""
+        for _ in range(3):
+            self.tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
+        for _ in range(3):
+            self.tool.use(json.dumps({"severity": "Minor", "problem_id": "prob2"}))
+        self.tool.reset_all()
+        r1 = self.tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
+        r2 = self.tool.use(json.dumps({"severity": "Minor", "problem_id": "prob2"}))
+        assert "Hint Level: 2" in r1
+        assert "Hint Level: 3" in r2
+
+
+class TestMarkComplete:
+    """Tests for mark_complete behavior."""
+
+    def setup_method(self):
+        self.tool = GetHintLevelTool()
+
+    def test_mark_complete_resets_and_confirms(self):
+        """mark_complete=True with problem_id resets hints and returns confirmation."""
+        for _ in range(3):
+            self.tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
+        result = self.tool.use(json.dumps({
+            "mark_complete": True,
+            "problem_id": "prob1",
+        }))
+        assert "marked complete" in result
+        assert "prob1" in result
+
+    def test_mark_complete_allows_fresh_start(self):
+        """After mark_complete, next hint for same problem starts at base level."""
+        for _ in range(5):
+            self.tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
+        self.tool.use(json.dumps({
+            "mark_complete": True,
+            "problem_id": "prob1",
+        }))
+        result = self.tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
+        assert "Hint Level: 2" in result
+
+    def test_mark_complete_without_problem_id_gives_normal_hint(self):
+        """mark_complete without problem_id falls through to normal hint calculation."""
+        result = self.tool.use(json.dumps({
+            "mark_complete": True,
+            "severity": "Minor",
+        }))
+        assert "Hint Level: 3" in result
+
+    def test_mark_complete_false_gives_normal_hint(self):
+        """mark_complete=False should not trigger completion."""
+        result = self.tool.use(json.dumps({
+            "mark_complete": False,
+            "severity": "Major",
+            "problem_id": "prob1",
+        }))
+        assert "Hint Level: 2" in result

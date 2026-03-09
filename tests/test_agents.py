@@ -52,7 +52,7 @@ class TestTutorAgentCreation:
         agent = TutorAgent.create(MockLLM(), WorkingMemory(), MockRetriever())
         assert isinstance(agent.tool_executor, ToolExecutor)
 
-    def test_has_all_four_tools(self):
+    def test_has_all_six_tools(self):
         from fairlib import WorkingMemory
         from agents.tutor_agent import TutorAgent
 
@@ -61,7 +61,9 @@ class TestTutorAgentCreation:
         assert "retrieve_course_materials" in tool_names
         assert "check_student_history" in tool_names
         assert "get_hint_level" in tool_names
+        assert "conversation_state" in tool_names
         assert "safe_calculator" in tool_names
+        assert "advanced_calculus_tool" in tool_names
 
     def test_no_llm_wrapper_tools(self):
         """Old LLM-wrapper tools must not be registered."""
@@ -121,7 +123,7 @@ class TestTutorAgentPrompt:
 
     def test_has_format_instructions(self):
         builder = self._get_prompt()
-        assert len(builder.format_instructions) >= 2
+        assert len(builder.format_instructions) >= 3
 
     def test_has_examples(self):
         builder = self._get_prompt()
@@ -167,7 +169,8 @@ class TestTutorAgentPrompt:
         all_text += " ".join(e.text for e in builder.examples)
 
         for tool_name in ["retrieve_course_materials", "check_student_history",
-                          "get_hint_level", "safe_calculator"]:
+                          "get_hint_level", "conversation_state",
+                          "safe_calculator", "advanced_calculus_tool"]:
             assert tool_name in all_text, (
                 f"Tool name '{tool_name}' not found in prompt"
             )

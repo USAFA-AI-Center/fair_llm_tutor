@@ -17,6 +17,11 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from dotenv import load_dotenv
+
+# Load .env from project root (for API keys)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
 from pydantic import BaseModel, ValidationError
 
 from fairlib.core.interfaces.llm import AbstractChatModel

@@ -1,4 +1,8 @@
-"""Hint level calculation tool — pure computation, no LLM calls."""
+"""Hint level calculation tool — pure computation, no LLM calls.
+
+Supports stateful hint escalation: tracks how many hints have been given
+per problem and auto-escalates after repeated hints at the same level.
+"""
 
 from pydantic import ValidationError
 
@@ -19,22 +23,31 @@ SEVERITY_TO_LEVEL = {
     "minor": 3,
 }
 
+# After this many hints at the same level, auto-escalate
+_ESCALATION_THRESHOLD = 2
+
 
 class GetHintLevelTool(AbstractTool):
     """Calculates the appropriate hint specificity level (1-4).
 
     Uses a deterministic severity-to-level mapping with optional override.
+    Tracks hint counts per problem_id and auto-escalates after repeated hints.
     Pure computation — no LLM call.
     """
 
     name = "get_hint_level"
     description = (
         "Calculates the appropriate hint specificity level (1-4) based on "
-        "error severity and optional override. Pure computation, no LLM. "
-        'Input: JSON with "severity" (Critical/Major/Minor) and optional '
-        '"hint_level_override" (int 1-4). '
+        "error severity and optional override. Tracks hints per problem and "
+        "auto-escalates after repeated hints at the same level. Pure computation, no LLM. "
+        'Input: JSON with "severity" (Critical/Major/Minor), optional '
+        '"hint_level_override" (int 1-4), and optional "problem_id" (str). '
         "Returns the hint level with a description of the expected specificity."
     )
+
+    def __init__(self) -> None:
+        # problem_id -> total hint count for that problem
+        self._problem_hint_counts: dict[str, int] = {}
 
     def use(self, tool_input: str) -> str:
         try:
@@ -42,15 +55,45 @@ class GetHintLevelTool(AbstractTool):
         except (ValueError, ValidationError):
             return (
                 'ERROR: Invalid JSON input. Expected: '
-                '{"severity": "Major", "hint_level_override": null}'
+                '{"severity": "Major", "hint_level_override": null, "problem_id": null}'
             )
 
+        # Handle mark_complete: reset the problem and return confirmation
+        if inp.mark_complete and inp.problem_id:
+            self.reset_problem(inp.problem_id)
+            return f"Problem '{inp.problem_id}' marked complete. Hint count reset."
+
         # Deterministic severity → hint level mapping
-        level = SEVERITY_TO_LEVEL.get(inp.severity.lower(), 2)
+        base_level = SEVERITY_TO_LEVEL.get(inp.severity.lower(), 2)
 
         # Apply override if provided (clamped to [1, 4])
         if inp.hint_level_override is not None:
-            level = max(1, min(4, inp.hint_level_override))
+            base_level = max(1, min(4, inp.hint_level_override))
+
+        # Stateful escalation based on problem_id
+        level = base_level
+        hint_count = 0
+        if inp.problem_id:
+            hint_count = self._problem_hint_counts.get(inp.problem_id, 0)
+            self._problem_hint_counts[inp.problem_id] = hint_count + 1
+
+            # Auto-escalate: after _ESCALATION_THRESHOLD hints, bump level
+            escalation_bumps = hint_count // _ESCALATION_THRESHOLD
+            level = min(4, base_level + escalation_bumps)
 
         description = HINT_LEVEL_DESCRIPTIONS.get(level, HINT_LEVEL_DESCRIPTIONS[2])
-        return f"Hint Level: {level}\nDescription: {description}"
+
+        result = f"Hint Level: {level}\nDescription: {description}"
+        if inp.problem_id and hint_count > 0:
+            result += f"\nHint count for this problem: {hint_count + 1}"
+            if level > base_level:
+                result += f" (auto-escalated from level {base_level})"
+        return result
+
+    def reset_problem(self, problem_id: str) -> None:
+        """Reset hint count for a problem (e.g., when switching problems)."""
+        self._problem_hint_counts.pop(problem_id, None)
+
+    def reset_all(self) -> None:
+        """Reset all hint counts."""
+        self._problem_hint_counts.clear()

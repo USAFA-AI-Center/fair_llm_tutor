@@ -38,3 +38,21 @@ class HistoryCheckInput(BaseModel):
 class HintLevelInput(BaseModel):
     severity: str = "Major"
     hint_level_override: Optional[int] = None
+    problem_id: Optional[str] = None
+    mark_complete: Optional[bool] = None
+
+
+# --- Conversation state tool I/O ---
+
+class ConversationStateAction(str, Enum):
+    GET = "get"
+    UPDATE = "update"
+
+
+class ConversationStateInput(BaseModel):
+    action: ConversationStateAction
+    set_current_problem: Optional[str] = None
+    problem_text: Optional[str] = None
+    mark_solved: Optional[str] = None
+    increment_correct_turns: bool = False
+    reset_correct_turns: bool = False

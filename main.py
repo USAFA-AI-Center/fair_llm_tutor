@@ -37,6 +37,7 @@ from fairlib import (
     Document,
     HuggingFaceAdapter,
     WorkingMemory,
+    SummarizingMemory,
     ChromaDBVectorStore,
     SentenceTransformerEmbedder,
     SimpleRetriever,
@@ -45,6 +46,7 @@ from fairlib import (
 from fairlib.utils.document_processor import DocumentProcessor
 
 from agents.tutor_agent import TutorAgent
+from tools.conversation_state_tools import ConversationStateTool
 from config import TutorConfig
 
 logger = logging.getLogger(__name__)
@@ -100,6 +102,11 @@ class TutorSession:
 
         # Build single tutor agent
         self.agent = self._build_agent()
+
+        # Get reference to conversation state tool for prepending state
+        self.state_tool: ConversationStateTool = (
+            self.agent.tool_executor.tool_registry.get_tool("conversation_state")
+        )
 
         logger.info("Domain-Agnostic Tutor initialized successfully!")
 
@@ -160,10 +167,14 @@ class TutorSession:
         return SimpleRetriever(vector_store)
 
     def _build_agent(self) -> TutorAgent:
-        """Build the single tutor agent with all tools."""
+        """Build the single tutor agent with SummarizingMemory for long sessions."""
         return TutorAgent.create(
             llm=self.llm,
-            memory=WorkingMemory(),
+            memory=SummarizingMemory(
+                llm=self.llm,
+                max_history_length=30,
+                messages_to_keep_at_end=8,
+            ),
             retriever=self.retriever,
             max_steps=self.config.max_steps,
         )
@@ -180,7 +191,11 @@ class TutorSession:
         Returns:
             Tutor's response
         """
+        # Prepend conversation state so the agent always sees it
+        state_summary = self.state_tool.use('{"action": "get"}')
+
         request = (
+            f"CONVERSATION STATE:\n{state_summary}\n\n"
             f"PROBLEM: {problem_text}\n\n"
             f"STUDENT WORK: {student_work}\n\n"
             f"TOPIC: {topic}\n\n"
