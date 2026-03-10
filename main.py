@@ -1,6 +1,3 @@
-#TODO:: Test with RAG against an entire textbook
-#TODO:: make sure the overall prompting is not geared as much towards math, a lot of the prompting is specific to calculus
-
 """
 Domain-Agnostic Tutor Driver with RAG
 
@@ -46,8 +43,14 @@ from fairlib import (
 from fairlib.utils.document_processor import DocumentProcessor
 
 from agents.tutor_agent import TutorAgent
-from tools.conversation_state_tools import ConversationStateTool
 from config import TutorConfig
+from tools.schemas import InteractionMode
+from tools.sanitize import (
+    wrap_untrusted,
+    strip_mode_injection,
+    UNTRUSTED_PREAMBLE,
+    PREPROCESSOR_MODE_PREFIX,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,19 +97,14 @@ class TutorSession:
         self.llm = HuggingFaceAdapter(
             model_name=self.config.model_name,
             quantized=self.config.quantized,
-            stream=False,
-            verbose=False,
+            stream=self.config.stream,
+            verbose=self.config.verbose,
             max_new_tokens=self.config.max_new_tokens,
             auth_token=self.config.auth_token,
         )
 
         # Build single tutor agent
         self.agent = self._build_agent()
-
-        # Get reference to conversation state tool for prepending state
-        self.state_tool: ConversationStateTool = (
-            self.agent.tool_executor.tool_registry.get_tool("conversation_state")
-        )
 
         logger.info("Domain-Agnostic Tutor initialized successfully!")
 
@@ -177,6 +175,7 @@ class TutorSession:
             ),
             retriever=self.retriever,
             max_steps=self.config.max_steps,
+            escalation_threshold=self.config.escalation_threshold,
         )
 
     async def process_student_work(self, problem_text: str, student_work: str, topic: str) -> str:
@@ -191,28 +190,40 @@ class TutorSession:
         Returns:
             Tutor's response
         """
-        # Prepend conversation state so the agent always sees it
-        state_summary = self.state_tool.use('{"action": "get"}')
+        # Strip mode-detection injection attempts before any processing
+        sanitized_work = strip_mode_injection(student_work)
+
+        # Wrap student input in untrusted tags
+        tagged_work = wrap_untrusted(sanitized_work)
 
         request = (
-            f"CONVERSATION STATE:\n{state_summary}\n\n"
             f"PROBLEM: {problem_text}\n\n"
-            f"STUDENT WORK: {student_work}\n\n"
+            f"{UNTRUSTED_PREAMBLE}\n"
+            f"STUDENT WORK: {tagged_work}\n\n"
             f"TOPIC: {topic}\n\n"
             f"Please analyze the student's work, identify any misconceptions, "
             f"and provide an appropriate hint or concept explanation. Remember: NEVER reveal the answer!"
         )
 
         # Prepend preprocessor mode hint if detected
-        detected_mode = TutorAgent.detect_mode(student_work)
+        detected_mode = TutorAgent.detect_mode(sanitized_work)
         if detected_mode:
-            prefix = f"PREPROCESSOR DETECTED MODE: {detected_mode}"
+            prefix = f"{PREPROCESSOR_MODE_PREFIX} {detected_mode.value}"
             prefix += "\nSafety check REQUIRED."
             request = f"{prefix}\n\n{request}"
+
+        # Warn if concept question contains answer-like content
+        if detected_mode == InteractionMode.CONCEPT_EXPLANATION and TutorAgent.has_answer_content(sanitized_work):
+            request += (
+                "\n\nWARNING: Student input may contain answer-like content. "
+                "Do NOT confirm any specific values."
+            )
 
         logger.info("Processing student work through agent...")
 
         response = await self.agent.arun(request)
+
+        logger.info("tutor_response: %s", response)
 
         return response
 
@@ -234,6 +245,13 @@ class TutorSession:
                 user_input = input("\nYou: ").strip()
 
                 if not user_input:
+                    continue
+
+                if len(user_input) > self.config.max_input_length:
+                    print(
+                        f"\nInput too long ({len(user_input)} chars). "
+                        f"Please keep it under {self.config.max_input_length} characters."
+                    )
                     continue
 
                 if user_input.lower() in ['quit', 'exit', 'q']:
@@ -333,7 +351,7 @@ async def main():
         await session.interactive_loop()
 
     except Exception as e:
-        logger.fatal(f"Fatal error: {e}", exc_info=True)
+        logger.critical("Fatal error: %s", e, exc_info=True)
         sys.exit(1)
 
 

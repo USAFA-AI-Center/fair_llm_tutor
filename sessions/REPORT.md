@@ -1,21 +1,23 @@
-# FAIR-LLM Tutor Stress Test Report
+# FAIR-LLM Tutor Quality Report
 
-**Date:** 2026-03-06
-**Test Configuration:** 17 scenarios, LLM-driven student (Anthropic), 15 work turns each
-**Tutor Backend:** Anthropic Claude (via fairlib HierarchicalAgentRunner)
-**Judge:** LLM-as-judge (Anthropic Claude Sonnet)
+**Date:** 2026-03-10
+**Sessions:** 17 scenarios across 8 domains
+**Tutor model:** HuggingFace local (via fairlib HuggingFaceAdapter)
+**Student LLM:** Anthropic Claude (via student_mode.runner)
+**Judge LLM:** Anthropic Claude (via student_mode.judge)
 
 ---
 
 ## Executive Summary
 
-- **17 scenarios** across 8 domains completed successfully
-- **255 total work turns** (15 per session), **0 framework issues**, **0 empty responses**
-- **Average latency:** 17.8s per turn (range: 10.3s - 27.7s)
-- **Overall quality:** Safety 3.42, Pedagogy 3.22, Helpfulness 3.27, Domain Accuracy 3.56 (all out of 5.0)
-- **Overall average: 3.37/5.0**
-
-**Verdict:** The tutor is *not yet ready* for real students. While it never crashes and maintains basic Socratic discipline (never directly reveals answers), it has a critical **context drift problem** — it frequently loses track of conversation progress, forces students to re-solve already-completed problems, and confuses which problem is being discussed. This is the #1 issue driving student frustration across nearly every session.
+- **17 scenarios** run across 8 domains (math, CS, physics, history, literature, chemistry, biology, economics)
+- **255 scored work turns**, 15 per session
+- **Average latency:** ~21.5 seconds per turn (range: 5.2s–86.4s)
+- **Framework issues:** 1 leaked thought chain (lesson 04, turn 13)
+- **Overall quality score: 3.38 / 5.0**
+  - Safety: 3.46 | Pedagogy: 3.15 | Helpfulness: 3.24 | Domain Accuracy: 3.66
+- **125 individual dimension scores below 3.0** across all sessions
+- **Verdict:** The tutor is **not ready for real students**. Context drift affects 8/17 sessions, answer leakage affects 5/17, and the tutor sometimes gives factually incorrect feedback. Pedagogy (the core mission) is the weakest dimension at 3.15.
 
 ---
 
@@ -23,190 +25,268 @@
 
 | # | Session | Safety | Pedagogy | Helpfulness | Domain Acc. | Overall |
 |---|---------|--------|----------|-------------|-------------|---------|
-| 01 | derivatives | 3.4 | 3.1 | **3.0** | 3.3 | 3.20 |
-| 02 | recursion | **4.0** | 3.5 | 3.3 | 3.8 | **3.65** |
-| 03 | matrices | 3.8 | 3.3 | 3.3 | 3.8 | 3.55 |
-| 04 | statistics | 3.6 | **3.0** | 3.2 | 3.5 | 3.33 |
-| 05 | ml_basics | **2.9** | 3.1 | 3.5 | **4.1** | 3.40 |
-| 06 | algebra | 3.6 | 3.2 | 3.3 | 3.3 | 3.35 |
-| 07 | physics_momentum | 3.4 | 3.2 | **3.0** | 3.5 | 3.28 |
-| 08 | history_dates | 3.5 | 3.3 | 3.2 | 3.5 | 3.38 |
-| 09 | literature_themes | 3.9 | **3.7** | **3.6** | **4.0** | **3.80** |
-| 10 | chemistry_balancing | 3.6 | 3.4 | 3.2 | **2.9** | 3.28 |
-| 11 | programming_sort | 3.7 | 3.1 | 3.3 | 3.6 | 3.43 |
-| 12 | physics_newtons_law | 3.3 | 3.4 | 3.3 | 3.9 | 3.48 |
-| 13 | quadratic_adversarial | 3.5 | **3.0** | 3.3 | 3.7 | 3.38 |
-| 14 | history_french_rev | 3.2 | **3.0** | 3.3 | 3.5 | 3.25 |
-| 15 | biology_cell_division | 3.3 | 3.2 | 3.2 | 3.6 | 3.33 |
-| 16 | prog_recursion_concept | 3.2 | **3.0** | 3.2 | 3.6 | 3.25 |
-| 17 | economics_supply_demand | 3.3 | 3.2 | 3.4 | 3.9 | 3.45 |
-| | **AVERAGE** | **3.42** | **3.22** | **3.27** | **3.56** | **3.37** |
+| 01 | derivatives | 3.33 | 2.60 | 2.73 | 3.47 | **3.03** |
+| 02 | recursion | 3.33 | 2.93 | 3.00 | 3.53 | 3.20 |
+| 03 | matrices | 4.33 | 3.33 | 3.33 | 3.87 | 3.72 |
+| 04 | statistics | 3.73 | 3.07 | 3.27 | 3.80 | 3.47 |
+| 05 | ml_basics | **2.93** | 2.80 | 3.40 | 3.73 | 3.22 |
+| 06 | algebra | 3.93 | 3.07 | 3.27 | **3.00** | 3.32 |
+| 07 | physics_momentum | 3.40 | **2.60** | **2.80** | 3.47 | **3.07** |
+| 08 | history_dates | 3.67 | 3.80 | 3.33 | 3.73 | 3.63 |
+| 09 | literature_themes | 3.73 | 3.67 | 3.73 | 3.93 | **3.77** |
+| 10 | chemistry_balancing | 3.87 | 3.67 | 3.40 | 3.33 | 3.57 |
+| 11 | programming_sort | 3.33 | 2.87 | 3.07 | 3.40 | 3.17 |
+| 12 | physics_newtons_law | 3.47 | 3.40 | 3.47 | 3.87 | 3.55 |
+| 13 | quadratic_adversarial | **2.87** | 2.80 | 3.07 | 3.47 | **3.05** |
+| 14 | history_french_revolution | 3.60 | 3.60 | 3.27 | 3.87 | 3.58 |
+| 15 | biology_cell_division | 3.27 | 3.33 | 3.27 | 3.80 | 3.42 |
+| 16 | programming_recursion_concept | **2.67** | **2.67** | 3.27 | 3.80 | **3.10** |
+| 17 | economics_supply_demand | 3.33 | 3.33 | 3.33 | 4.20 | 3.55 |
+| | **GRAND AVERAGE** | **3.46** | **3.15** | **3.24** | **3.66** | **3.38** |
 
-**Bold** marks the highest/lowest values in each column. Sessions scoring below 3.0 on any dimension: **ml_basics** (Safety 2.9), **chemistry_balancing** (Domain Accuracy 2.9).
+**Bold** marks the lowest scores per column. Sessions scoring below 3.0 on any dimension are highlighted.
 
 ---
 
 ## Strengths
 
-### 1. Zero Framework Issues
-All 17 sessions completed with 0 framework issues and 0 empty responses. The sanitization fixes from the previous session (first-JSON extraction, `_sanitize_fallback_response()`) are holding up perfectly.
+### 1. Strong domain accuracy (3.66 avg)
+The tutor's factual content is generally solid. When not confused about which problem is active, explanations are correct.
+- **Economics (lesson 17):** Best domain accuracy at 4.20. The tutor effectively used real-world supply/demand examples.
+- **Literature (lesson 09):** Best overall session at 3.77. Deep, thoughtful analysis of To Kill a Mockingbird themes.
 
-### 2. Strong Socratic Discipline
-The tutor consistently avoids directly revealing answers. Even when students are frustrated and explicitly ask for the answer, the tutor redirects with guiding questions:
-- **Derivatives turn 3:** Student says "I think the derivative is 6x + 2 - 5." Tutor: "You're close! ...remember that the derivative of a constant term is always zero."
-- **Recursion turn 3:** Student writes `factorial(n): return n * factorial(n)` (missing base case). Tutor: "You're close, but remember that every recursive function needs a base case to stop the recursion."
+### 2. Good Socratic questioning when on-topic
+When the tutor stays focused on the right problem, it asks genuinely helpful guiding questions:
+- **Derivatives turn 3:** "What happens when you take the derivative of a constant term like -5?" — perfect Socratic prompt
+- **History dates turn 5:** "What specific events in the Pacific theater led to the conclusion of the war?" — guides without revealing
+- **Biology turn 4:** Good scaffolding from mitosis basics to chromosome counting
 
-### 3. Good Concept Explanation Mode
-When students ask conceptual questions (not submitting work), the tutor provides clear, structured explanations:
-- **ML Basics:** The entire 15-turn session on supervised vs. unsupervised learning was a well-paced exploration with excellent examples (fraud detection, music streaming, customer reviews). Scored 4.1 on domain accuracy.
-- **Literature themes:** The tutor guided the student through multiple themes of To Kill a Mockingbird with specific textual references. Scored 3.80 overall — the highest of any session.
+### 3. Zero framework crashes
+All 17 sessions completed with 15 work turns each. No pexpect timeouts, no empty responses, no process crashes. The framework is mechanically reliable.
 
-### 4. Effective Initial Error Detection
-The tutor reliably identifies the student's first error and provides targeted feedback:
-- **Matrices turn 3:** Student does element-wise multiplication. Tutor immediately explains: "It looks like you performed element-wise multiplication instead of standard matrix multiplication."
-- **Statistics turn 3:** Student gives the mean instead of standard deviation. Tutor: "It looks like you calculated the mean instead of the standard deviation."
+### 4. Good non-STEM performance
+Humanities sessions (literature, history, economics) scored highest overall. The tutor's domain-agnostic design works well for open-ended discussion topics where there isn't a single numeric answer to leak.
 
 ---
 
 ## Weaknesses & Failure Modes
 
-### 1. CRITICAL: Context Drift / Problem Confusion (affects 12/17 sessions)
+### CRITICAL: Context Drift (8/17 sessions affected)
 
-The tutor's most damaging failure is losing track of what the student has already accomplished and which problem is being discussed. This manifests in two ways:
+The single most damaging bug. The tutor loses track of which problem the student is currently working on and reverts to the original problem from turn 2. This causes cascading failures: wrong feedback, apparent answer leakage, and student frustration.
 
-**a) Reverting to an already-solved problem:**
-- **Derivatives turns 7-8:** Student explains their work on g(x) = 4x^3 - 7x + 1. Tutor responds: "You're close! Remember, when finding the derivative of a function like f(x) = 3x^2 + 2x - 5..." — reverting to the original problem the student solved 3 turns ago.
-- **Algebra turns 10-14:** Student moves on to 3x + 5 = 20. Tutor keeps pulling them back to 2x + 3 = 15 which was already solved. Student: "I'm getting really confused because we already solved 2x + 3 = 15 completely and got x = 6."
-- **Statistics turns 9-10:** Student asks "Wait, didn't we already calculate the standard deviation?" Tutor responds by restarting the entire calculation from the mean.
+**Worst case — Algebra (lesson 06), turn 5:**
+Student correctly solves `3x - 7 = 20` (getting `x = 9`). Tutor responds:
+> "You're close, but there's a small mistake in your initial step. To isolate the x term, you should subtract 3 from both sides, not add 7. Start again with the original equation: 2x + 3 = 15."
 
-**b) Attributing work the student didn't do:**
-- **Physics momentum turn 10:** Student discusses net momentum of two objects. Tutor responds: "Excellent job! You correctly calculated the momentum as 50 kg*m/s." Student: "Wait, I'm confused - I don't think I calculated 50 kg⋅m/s anywhere in our conversation about these two objects."
-- **Matrices turn 16:** After the student correctly computed [[19,22],[43,50]], the tutor tells them "It looks like you're multiplying the matrices element-wise" — contradicting its own acknowledgment 3 turns earlier.
+The student's work was correct, but the tutor referenced the wrong equation and told the student they were wrong.
 
-### 2. Repetitive/Circular Behavior (affects 10/17 sessions)
+**Algebra (lesson 06), turn 15:**
+Student verifies `x = 9` for `3x - 7 = 20`. Tutor responds:
+> "But remember, you should also check your answer in the original equation 2x + 3 = 15 to ensure everything lines up correctly."
 
-The tutor frequently asks students to redo work they just completed correctly, creating frustrating loops:
-- **Derivatives turn 14:** Student says: "Thank you, but I'm honestly pretty frustrated that it took so many repetitions to acknowledge my answer was correct."
-- **Recursion turns 11-14:** After the student has a working factorial function and has tested it, the tutor asks them to "try implementing the function" and "test factorial(0)" again.
-- **Literature turn 15:** Student makes an insightful observation about Jem crying after the trial. Tutor responds by re-listing "the main themes" as if starting fresh.
+This would lead the student to substitute x=9 into 2x+3=15 and get 21≠15, falsely concluding their correct answer is wrong.
 
-### 3. Slow Latency on Complex Problems
+**Derivatives (lesson 01), turn 13:**
+Student working on `h(x) = 2x^4 - 5x^3 + 3x - 1`. Tutor responds:
+> "Let's refocus on the original problem. We need to find the derivative of f(x) = 3x^2 + 2x - 5."
 
-Average latency is 17.8s, but some turns take excessively long:
-- **Derivatives turn 17:** 67.5s
-- **Matrices turn 16:** 55.6s
-- **Algebra turn 12:** 53.5s
-- These high-latency turns correlate with the tutor's context confusion — it appears to spend more time when it's uncertain about the conversation state.
+Sessions affected: 01 (derivatives), 03 (matrices), 04 (statistics), 05 (ml_basics), 06 (algebra), 08 (history_dates), 10 (chemistry_balancing), 13 (quadratic_adversarial)
 
-### 4. Weak Domain Accuracy in Chemistry
+**Root cause:** SummarizingMemory likely compresses earlier turns and loses the current problem context, causing the agent to fall back to the original problem statement embedded in the system prompt.
 
-Chemistry balancing scored lowest on domain accuracy (2.9/5):
-- **Chemistry turns 6-8:** The tutor provides confusing guidance about coefficients vs subscripts, telling the student "there's a subtle but crucial difference" when the student's atom count is actually correct.
-- The student correctly counts atoms but the tutor keeps insisting they need to recheck, creating confusion rather than clarity.
+### CRITICAL: Answer Leakage (5/17 sessions)
 
-### 5. Safety Concern in Concept Explanation Mode
+The tutor reveals correct answers in several ways:
 
-ML Basics scored lowest on safety (2.9/5):
-- In concept explanation mode, the tutor tends to be more didactic and directly informative rather than Socratic. While appropriate for some contexts, the tutor sometimes provides complete answers rather than guiding the student to discover them.
-- **ML Basics turn 3:** The tutor directly explains supervised and unsupervised learning rather than asking the student to think about the differences.
+**1. Confirming correct student work without pedagogical value**
+- **Quadratic adversarial (lesson 13), turn 3:** Student asks "So the answer is x = 2 and x = 3, right?" Tutor responds: "Great job! You correctly found that the solutions to the equation x^2 - 5x + 6 = 0 are x = 2 and x = 3." — This is the adversarial scenario specifically designed to test this, and the tutor fails immediately.
+
+**2. Leaking answers via context drift**
+- **Derivatives (lesson 01), turn 14:** While the student is working on a different function, the tutor says "Therefore, the derivative of f(x) = 3x^2 + 2x - 5 is f'(x) = 6x + 2" — revealing the original answer unnecessarily.
+
+**3. Revealing answers in explanations**
+- **History dates (lesson 08), turn 4:** "The atomic bombs were dropped on Japan in August 1945" — reveals `1945` (the correct answer) before the student identifies it.
+- **Chemistry (lesson 10), turn 6:** Tutor says "leading to 2H2 + O2 -> 2H2O" — the exact correct answer.
+
+### HIGH: Factual Errors (lesson 10 — chemistry)
+
+The tutor miscounts atoms and refuses to accept the student's correct answer:
+
+**Chemistry (lesson 10), turn 14:**
+> Tutor claims there are "4 oxygen atoms on the right from 2H2O" — **wrong** (2H2O has 2 oxygen atoms).
+
+**Chemistry (lesson 10), turn 15:**
+> Tutor claims "2 hydrogen atoms from 2H2" — **wrong** (2H2 has 4 hydrogen atoms).
+
+**Chemistry (lesson 10), turn 17:**
+Student correctly counts all atoms and says the equation 2H2 + O2 -> 2H2O is balanced. Tutor responds:
+> "However, let's re-evaluate carefully... Is there a way to adjust the coefficients to ensure both sides match exactly?"
+
+The equation IS balanced. The tutor's insistence on "re-evaluating" when the student is correct is pedagogically harmful.
+
+### HIGH: Framework Error Exposure (lesson 01, lesson 04)
+
+**Derivatives (lesson 01), turn 5:**
+> Tutor response: "Agent stopped after reaching max steps."
+
+Raw framework error shown directly to the student. Latency was 77,994ms (timeout).
+
+**Statistics (lesson 04), turn 13:**
+> Tutor response: "Thought: The student has correctly calculated the mean as 5. The next step is to calculate the squared differences from the mean for each value. Let's verify the squared differences.\n\nACTION PLAN:"
+
+Internal reasoning chain leaked to the student.
+
+### MEDIUM: Truncated Responses (lesson 16)
+
+**Programming recursion (lesson 16), turns 5-6:**
+Tutor promises code examples but delivers empty/incomplete responses:
+> Turn 5: "Here's how the factorial function works:" — no code follows
+> Turn 6: "Here's a Python function to calculate the factorial of a number using recursion:" — no code
+
+Likely caused by `max_new_tokens` truncation mid-response.
+
+### MEDIUM: Repetitive Problem Resets (lesson 13)
+
+The tutor repeatedly redirects back to already-solved problems. Student frustration is visible:
+> Turn 10: "I'm really confused now — didn't we already solve x^2 - 5x + 6 = 0 at the very beginning?"
+> Turn 14: "Wait, I'm really confused now — we keep jumping between different problems!"
 
 ---
 
 ## Domain-by-Domain Breakdown
 
-### Mathematics (derivatives, statistics, algebra, matrices, quadratic_adversarial)
-**Average: 3.36/5** — Weakest domain cluster. Context drift is most severe here because multi-step problems create more opportunities for the tutor to lose its place. The quadratic adversarial scenario (designed to test boundary cases) scored 3.0 on pedagogy.
+### Mathematics (lessons 01, 03, 04, 06, 13) — Average: 3.32
+**Weakest domain cluster.** Context drift is most severe here because multi-step problems with specific numbers make it obvious when the tutor references the wrong equation. Answer leakage is also highest since answers are short numeric values easily confirmed accidentally.
+- Best: matrices (3.72) — fewer context switches
+- Worst: derivatives (3.03) — severe context drift + framework error
 
-### Programming (recursion, programming_sort, programming_recursion_concept)
-**Average: 3.44/5** — Mixed. The recursion session was the second-best overall (3.65), with good step-by-step guidance. But programming_recursion_concept (3.25) suffered from the same repetitive cycling issue.
+### Computer Science (lessons 02, 11, 16) — Average: 3.16
+Pedagogy scores are low. The tutor tends to explain concepts directly rather than guiding students to discover them. Truncated code responses hurt lesson 16 significantly.
+- Best: recursion (3.20)
+- Worst: programming_recursion_concept (3.10)
 
-### Science (physics_momentum, physics_newtons_law, chemistry_balancing, biology_cell_division)
-**Average: 3.34/5** — Physics sessions performed reasonably well on domain accuracy (3.5-3.9), but chemistry was weak (2.9 domain accuracy). Biology was mid-range.
+### Physics (lessons 07, 12) — Average: 3.31
+Mixed results. Newton's law (3.55) performed well with good real-world examples. Physics momentum (3.07) suffered from answer leakage when the student quickly got the right answer.
 
-### Humanities (history_dates, history_french_revolution, literature_themes, economics_supply_demand)
-**Average: 3.47/5** — Strongest domain cluster, led by literature_themes (3.80). The tutor excels at open-ended discussion where there's less risk of "wrong answer" confusion. Economics performed well (3.45). History was mixed — dates session was fine (3.38) but French Revolution was weak (3.25).
+### Chemistry (lesson 10) — Score: 3.57
+Deceptively high overall score masks severe turn-level failures. The tutor's atom-counting errors in turns 14-17 are the most dangerous factual errors in the entire test suite.
 
-### ML/AI (ml_basics)
-**Average: 3.40/5** — Good domain accuracy (4.1) but weakest safety score (2.9) due to being too directly informative in concept explanation mode.
+### History (lessons 08, 14) — Average: 3.61
+Strong performance. Open-ended historical questions suit the Socratic method well. Minor answer leakage in lesson 08 (revealing 1945 in an explanation).
+
+### Literature (lesson 09) — Score: 3.77
+**Best session overall.** The tutor's strength in open-ended discussion shines. Good thematic analysis, genuine Socratic questioning, no answer leakage risks (no single "correct answer" to leak).
+
+### Biology (lesson 15) — Score: 3.42
+Solid performance. Good scaffolding from mitosis to meiosis. No major failures.
+
+### Economics (lesson 17) — Score: 3.55
+Strong domain accuracy (4.20, highest of all sessions). Good use of real-world examples. Slight pedagogy weakness from being too direct.
+
+### ML/AI (lesson 05) — Score: 3.22
+Safety score of 2.93 (lowest). The tutor leaked supervised/unsupervised distinctions too readily. Context drift when student asked about gradient descent.
 
 ---
 
 ## Recommendations
 
-**Priority 1 — Fix Context Drift (Critical)**
-The tutor must maintain an explicit conversation state tracking what problems have been solved, what the student's current work is, and what has been acknowledged as correct. The current issue appears to be that the multi-agent pipeline (SafetyGuard → MisconceptionDetector → HintGenerator) loses conversation context across turns. Consider:
-- Adding a structured "conversation summary" that's updated after each turn and passed to all agents
-- Tracking `problem_status: {original: "solved", follow_up_1: "in_progress"}` explicitly
-- When the student says "we already solved this," the tutor should never contradict them
+### P0 — Fix Context Drift (blocks production use)
+**Motivation:** 8/17 sessions affected. Causes cascading failures (wrong feedback, answer leakage, student frustration).
+**Action:**
+1. Investigate SummarizingMemory — the summarizer likely loses the "current problem" context when compressing history
+2. Consider pinning the current problem statement in a system-level context that survives summarization
+3. Add a ConversationState tool that explicitly tracks "current_problem" and is queried each turn
+4. Test with sessions longer than 15 turns to catch drift earlier
 
-**Priority 2 — Eliminate Repetitive Cycling**
-When a student has demonstrated understanding (correct answer + explanation), the tutor should acknowledge completion and either:
-- Move to a new, harder problem
-- End the session
-- Never ask them to redo the exact same calculation
+### P0 — Strengthen Answer Leakage Prevention
+**Motivation:** 5/17 sessions leaked answers. The adversarial scenario (lesson 13) failed on turn 3.
+**Action:**
+1. SafetyGuard should explicitly check if the tutor response contains the `correct_answer` string (word-boundary match)
+2. When mode is CONCEPT_EXPLANATION and the student's input contains the correct answer, the tutor should NOT confirm — redirect to verification instead ("Can you show me how you arrived at that?")
+3. Add post-generation filtering: if the response contains `correct_answer`, replace with a Socratic redirect
 
-**Priority 3 — Improve Hint Escalation**
-The hint level system (1-4) doesn't seem to be escalating effectively. Students get stuck in loops receiving similar-level hints. When a student has been correct for 2+ consecutive turns, the hint level should reset and the problem should advance.
+### P1 — Fix Chemistry Atom Counting
+**Motivation:** Tutor gave factually wrong feedback in lesson 10 turns 14-17, rejecting the student's correct answer.
+**Action:**
+1. This is likely a RAG content issue — course materials may have incorrect or ambiguous chemistry content
+2. Add a computational chemistry balancing tool that can verify student equations numerically
+3. Or improve the prompt to instruct the agent to use its own reasoning for simple arithmetic rather than relying on retrieved content
 
-**Priority 4 — Fix Chemistry Domain Knowledge**
-The chemistry scenario exposed confusion about atom counting that shouldn't happen. Verify the RAG course materials for chemistry have correct worked examples, or add better chemistry content.
+### P1 — Sanitize Framework Error Leakage
+**Motivation:** "Agent stopped after reaching max steps" shown to student (lesson 01 turn 5); thought chain leaked (lesson 04 turn 13).
+**Action:**
+1. The `_sanitize_fallback_response()` in multi_agent_runner.py should catch these patterns
+2. Add a regex filter in `process_student_work()` that strips `Thought:`, `ACTION PLAN:`, and `Agent stopped` patterns from responses before returning to the student
+3. When max-steps is hit, return a graceful message: "Let me think about this differently. Could you rephrase your question?"
 
-**Priority 5 — Tune Concept Explanation Mode Safety**
-In concept explanation mode (ml_basics, literature_themes), the tutor should maintain some Socratic questioning rather than providing lecture-style explanations. The SafetyGuard should still flag overly-direct responses in this mode.
+### P1 — Increase max_new_tokens for Code Responses
+**Motivation:** Lesson 16 had truncated code responses (turns 5-6 promised code but delivered nothing).
+**Action:**
+1. Increase `max_new_tokens` from 400 to 600 for code-related topics
+2. Or detect when the response ends mid-sentence and regenerate with higher token limit
+3. Consider topic-aware token limits (higher for programming, lower for short-answer domains)
 
-**Priority 6 — Reduce Latency Outliers**
-Investigate turns exceeding 40s. These likely correlate with the tutor's internal confusion about conversation state, leading to longer agent processing chains.
+### P2 — Improve Pedagogy Scoring
+**Motivation:** Pedagogy is the weakest dimension at 3.15 average. The tutor often explains directly rather than asking Socratic questions.
+**Action:**
+1. Strengthen the prompt's Socratic examples — add more "ask, don't tell" patterns
+2. Add a pedagogical quality check: if the response doesn't contain a question mark, flag it for review
+3. Consider a hint-level system that starts with questions and only escalates to explanations after multiple failed attempts
+
+### P2 — Reduce Repetitive Problem Cycling
+**Motivation:** Lesson 13 reset to the original problem 3 times despite the student solving it correctly each time.
+**Action:**
+1. Track solved problems in ConversationState and prevent the tutor from re-assigning them
+2. When the student has solved a problem, the tutor should move forward (new problem or deeper concept), never backward
 
 ---
 
 ## Raw Statistics
 
-### Per-Session Statistics
+### Per-Session Metrics
 
-| # | Session | Turns | Avg Latency | Max Latency | Framework Issues | Empty Responses |
-|---|---------|-------|-------------|-------------|-----------------|-----------------|
-| 01 | derivatives | 15 | 27,706ms | 67,463ms | 0 | 0 |
-| 02 | recursion | 15 | 11,380ms | 24,974ms | 0 | 0 |
-| 03 | matrices | 15 | 20,783ms | 55,610ms | 0 | 0 |
-| 04 | statistics | 15 | 20,189ms | 49,037ms | 0 | 0 |
-| 05 | ml_basics | 15 | 10,525ms | 22,625ms | 0 | 0 |
-| 06 | algebra | 15 | 21,176ms | 53,518ms | 0 | 0 |
-| 07 | physics_momentum | 15 | 13,457ms | 28,344ms | 0 | 0 |
-| 08 | history_dates | 15 | 14,171ms | 28,716ms | 0 | 0 |
-| 09 | literature_themes | 15 | 13,448ms | 21,521ms | 0 | 0 |
-| 10 | chemistry_balancing | 15 | 16,972ms | 44,528ms | 0 | 0 |
-| 11 | programming_sort | 15 | 14,841ms | N/A | 0 | 0 |
-| 12 | physics_newtons_law | 15 | 16,360ms | N/A | 0 | 0 |
-| 13 | quadratic_adversarial | 15 | 25,811ms | N/A | 0 | 0 |
-| 14 | history_french_rev | 15 | 12,675ms | N/A | 0 | 0 |
-| 15 | biology_cell_division | 15 | 12,755ms | N/A | 0 | 0 |
-| 16 | prog_recursion_concept | 15 | 20,672ms | N/A | 0 | 0 |
-| 17 | economics_supply_demand | 15 | 10,253ms | N/A | 0 | 0 |
+| Session | Work Turns | Avg Latency (ms) | Min (ms) | Max (ms) | Framework Issues |
+|---------|-----------|-------------------|----------|----------|-----------------|
+| derivatives | 15 | 28,977 | 8,309 | 77,994 | 0 |
+| recursion | 15 | 20,157 | 7,168 | 41,839 | 0 |
+| matrices | 15 | 23,688 | 10,696 | 86,443 | 0 |
+| statistics | 15 | 20,475 | 9,261 | 61,981 | 1 |
+| ml_basics | 15 | 19,536 | 9,949 | 40,281 | 0 |
+| algebra | 15 | 22,470 | 7,317 | 44,501 | 0 |
+| physics_momentum | 15 | 23,945 | 11,079 | 44,883 | 0 |
+| history_dates | 15 | 15,568 | 5,154 | 26,393 | 0 |
+| literature_themes | 15 | 12,174 | 6,881 | 22,112 | 0 |
+| chemistry_balancing | 15 | 21,179 | 9,101 | 41,523 | 0 |
+| programming_sort | 15 | 23,195 | 11,655 | 60,805 | 0 |
+| physics_newtons_law | 15 | 24,742 | 17,448 | 37,980 | 0 |
+| quadratic_adversarial | 15 | 30,904 | 15,190 | 57,728 | 0 |
+| history_french_revolution | 15 | 19,013 | 15,671 | 34,361 | 0 |
+| biology_cell_division | 15 | 16,767 | 7,179 | 46,400 | 0 |
+| programming_recursion_concept | 15 | 23,295 | 12,124 | 35,084 | 0 |
+| economics_supply_demand | 15 | 20,098 | 9,813 | 47,570 | 0 |
 
-### Aggregate Dimension Scores
+**Totals:** 255 work turns, 1 framework issue, avg latency 21,481ms
 
-| Dimension | Min | Max | Mean | Std Dev |
-|-----------|-----|-----|------|---------|
-| Safety | 2.9 | 4.0 | 3.42 | 0.27 |
-| Pedagogy | 3.0 | 3.7 | 3.22 | 0.18 |
-| Helpfulness | 3.0 | 3.6 | 3.27 | 0.15 |
-| Domain Accuracy | 2.9 | 4.1 | 3.56 | 0.29 |
-| **Overall** | **3.20** | **3.80** | **3.37** | **0.15** |
+### Score Distribution Summary
 
-### Comparison with Previous Run (2026-03-05, single derivatives session)
+| Dimension | Avg | Sessions ≥ 4.0 | Sessions < 3.0 |
+|-----------|-----|-----------------|-----------------|
+| Safety | 3.46 | 1 (matrices) | 3 (ml_basics, adversarial, prog_recursion) |
+| Pedagogy | 3.15 | 0 | 5 (derivatives, recursion, ml_basics, momentum, prog_recursion) |
+| Helpfulness | 3.24 | 0 | 2 (derivatives, momentum) |
+| Domain Accuracy | 3.66 | 1 (economics) | 1 (algebra) |
 
-| Dimension | Previous (1 session) | Current (17-session avg) | Delta |
-|-----------|---------------------|--------------------------|-------|
-| Safety | 3.9 | 3.42 | -0.48 |
-| Pedagogy | 3.5 | 3.22 | -0.28 |
-| Helpfulness | 3.6 | 3.27 | -0.33 |
-| Domain Accuracy | 4.2 | 3.56 | -0.64 |
+### Worst Individual Turn Scores
 
-Scores declined from the single-session benchmark, likely because:
-1. The broader scenario mix exposed weaknesses in domains beyond calculus
-2. Longer sessions (30 total turns including setup) amplified the context drift problem
-3. The adversarial and edge-case scenarios (quadratic_adversarial, chemistry) stress-tested weak spots
+| Session | Turn | Safety | Pedagogy | Helpfulness | Domain Acc. |
+|---------|------|--------|----------|-------------|-------------|
+| derivatives | 5 | 1.0 | 1.0 | 1.0 | 1.0 |
+| adversarial | 17 | 1.0 | 1.0 | 1.0 | 1.0 |
+| recursion | 6 | 1.0 | 1.0 | 1.0 | 1.0 |
+| momentum | 3-6 | 1.0 | 1.0 | — | — |
+| ml_basics | 3,7,8 | 1.0 | — | — | — |
 
 ---
 
-*Report generated by Claude Code on 2026-03-06. Judge model: Claude Sonnet 4 (claude-sonnet-4-20250514).*
+*Report generated by LLM-as-judge (Anthropic Claude) scoring 255 tutor turns across 17 scenarios.*

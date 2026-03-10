@@ -63,6 +63,26 @@ class TestRetrieveCourseMaterials:
         tool.use(json.dumps({"query": "test"}))
         assert retriever.last_top_k == 3
 
+    def test_type_error_propagates(self):
+        """TypeError should NOT be swallowed — it indicates a programming bug."""
+        class BuggyRetriever:
+            def retrieve(self, query, top_k=3):
+                raise TypeError("unexpected keyword argument")
+
+        tool = RetrieveCourseMaterialsTool(BuggyRetriever())
+        with pytest.raises(TypeError):
+            tool.use(json.dumps({"query": "anything"}))
+
+    def test_attribute_error_propagates(self):
+        """AttributeError should NOT be swallowed."""
+        class BuggyRetriever:
+            def retrieve(self, query, top_k=3):
+                raise AttributeError("bad attribute")
+
+        tool = RetrieveCourseMaterialsTool(BuggyRetriever())
+        with pytest.raises(AttributeError):
+            tool.use(json.dumps({"query": "anything"}))
+
     def test_handles_document_objects(self):
         """Works with fairlib Document objects that have .page_content."""
         class FakeDoc:

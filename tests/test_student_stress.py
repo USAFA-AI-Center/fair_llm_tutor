@@ -236,12 +236,12 @@ class TestHintEscalationEdgeCases:
         assert "Hint Level: 2" in result  # Major → Level 2
 
     def test_hint_level_large_value_clamped(self):
-        """hint_level_override=100 should clamp to Level 4."""
+        """hint_level_override=100 should clamp to Level 5."""
         import json
         result = self.tool.use(json.dumps({
             "severity": "Minor", "hint_level_override": 100
         }))
-        assert "Hint Level: 4" in result
+        assert "Hint Level: 5" in result
 
     def test_hint_level_override_replaces_severity(self):
         """Override takes precedence over severity mapping."""
@@ -268,7 +268,7 @@ class TestPreprocessorIntegration:
 
         request = f"PROBLEM: Calculate momentum\n\nSTUDENT WORK: {student_work}"
         if detected:
-            request = f"PREPROCESSOR DETECTED MODE: {detected}\n\n{request}"
+            request = f"PREPROCESSOR DETECTED MODE: {detected.value}\n\n{request}"
 
         assert request.startswith("PREPROCESSOR DETECTED MODE: HINT")
 
@@ -280,7 +280,7 @@ class TestPreprocessorIntegration:
 
         request = f"PROBLEM: General physics\n\nSTUDENT WORK: {student_work}"
         if detected:
-            request = f"PREPROCESSOR DETECTED MODE: {detected}\n\n{request}"
+            request = f"PREPROCESSOR DETECTED MODE: {detected.value}\n\n{request}"
 
         assert request.startswith("PREPROCESSOR DETECTED MODE: CONCEPT_EXPLANATION")
 

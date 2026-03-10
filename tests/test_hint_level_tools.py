@@ -43,14 +43,22 @@ class TestGetHintLevel:
             "severity": "Major",
             "hint_level_override": 99,
         }))
-        assert "Hint Level: 4" in result
+        assert "Hint Level: 5" in result
+
+    def test_level_5_override(self):
+        result = self.tool.use(json.dumps({
+            "severity": "Major",
+            "hint_level_override": 5,
+        }))
+        assert "Hint Level: 5" in result
+        assert "analogous example" in result.lower()
 
     def test_includes_description(self):
         result = self.tool.use(json.dumps({"severity": "Minor"}))
         assert "Targeted Socratic question" in result
 
     def test_all_levels_have_descriptions(self):
-        for level in range(1, 5):
+        for level in range(1, 6):
             result = self.tool.use(json.dumps({
                 "severity": "Major",
                 "hint_level_override": level,
@@ -93,18 +101,38 @@ class TestHintEscalation:
         assert "Hint count for this problem: 2" in result
 
     def test_third_hint_escalates(self):
-        """After 2 hints at same level, 3rd hint escalates."""
+        """Default threshold is 2, so after 2 hints, 3rd hint escalates."""
+        tool = GetHintLevelTool(escalation_threshold=2)
         for _ in range(2):
-            self.tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
-        result = self.tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
+            tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
+        result = tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
         assert "Hint Level: 3" in result
         assert "auto-escalated" in result
 
-    def test_escalation_caps_at_4(self):
-        """Escalation should never go above level 4."""
+    def test_configurable_threshold(self):
+        """Custom threshold of 4 should delay escalation."""
+        tool = GetHintLevelTool(escalation_threshold=4)
+        for _ in range(3):
+            tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
+        result = tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
+        # 4th hint, threshold=4 → hint_count=3 → 3//4=0 → no escalation yet
+        assert "Hint Level: 2" in result
+
+    def test_escalation_caps_at_5(self):
+        """Escalation should never go above level 5."""
         for _ in range(20):
             result = self.tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
-        assert "Hint Level: 4" in result
+        assert "Hint Level: 5" in result
+
+    def test_level_5_includes_escalation_guidance(self):
+        """Level 5 should include guidance about worked analogous example."""
+        tool = GetHintLevelTool(escalation_threshold=1)
+        # With threshold=1, second hint should escalate
+        tool.use(json.dumps({"severity": "Minor", "problem_id": "p"}))
+        tool.use(json.dumps({"severity": "Minor", "problem_id": "p"}))
+        result = tool.use(json.dumps({"severity": "Minor", "problem_id": "p"}))
+        assert "Hint Level: 5" in result
+        assert "ESCALATION" in result
 
     def test_different_problems_independent(self):
         """Hint counts are tracked per problem."""

@@ -43,7 +43,7 @@ class RetrieveCourseMaterialsTool(AbstractTool):
 
         try:
             docs = self.retriever.retrieve(inp.query, top_k=inp.top_k)
-        except Exception:
+        except (RuntimeError, ConnectionError, OSError, ValueError):
             logger.warning("Retriever failed for query: %s", inp.query, exc_info=True)
             return "No course materials found (retriever unavailable)."
 

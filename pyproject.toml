@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fair-llm-tutor"
+version = "0.1.0"
+description = "Domain-agnostic, multi-agent Socratic tutoring system built on fairlib"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "python-dotenv>=1.1.0",
+    "rich>=14.0.0",
+    "chromadb>=0.4.0",
+    "sentence-transformers>=2.2.0",
+    "pyyaml>=6.0.0",
+    "pdfplumber>=0.10.0",
+    "pdf2image>=1.16.0",
+    "pexpect>=4.9.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.scripts]
+fair-llm-tutor = "main:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]

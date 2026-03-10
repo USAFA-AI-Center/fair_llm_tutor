@@ -15,6 +15,10 @@ HINT_LEVEL_DESCRIPTIONS = {
     2: "Specific concept pointer — focus on the relevant concept",
     3: "Targeted Socratic question — guide toward the specific error",
     4: "Directed guidance — specific about what to check",
+    5: (
+        "Worked analogous example — demonstrate the same concept with "
+        "DIFFERENT values/context. Do NOT use the student's actual problem values."
+    ),
 }
 
 SEVERITY_TO_LEVEL = {
@@ -28,7 +32,7 @@ _ESCALATION_THRESHOLD = 2
 
 
 class GetHintLevelTool(AbstractTool):
-    """Calculates the appropriate hint specificity level (1-4).
+    """Calculates the appropriate hint specificity level (1-5).
 
     Uses a deterministic severity-to-level mapping with optional override.
     Tracks hint counts per problem_id and auto-escalates after repeated hints.
@@ -37,17 +41,19 @@ class GetHintLevelTool(AbstractTool):
 
     name = "get_hint_level"
     description = (
-        "Calculates the appropriate hint specificity level (1-4) based on "
+        "Calculates the appropriate hint specificity level (1-5) based on "
         "error severity and optional override. Tracks hints per problem and "
-        "auto-escalates after repeated hints at the same level. Pure computation, no LLM. "
+        "auto-escalates after repeated hints at the same level. Level 5 provides "
+        "a worked analogous example. Pure computation, no LLM. "
         'Input: JSON with "severity" (Critical/Major/Minor), optional '
-        '"hint_level_override" (int 1-4), and optional "problem_id" (str). '
+        '"hint_level_override" (int 1-5), and optional "problem_id" (str). '
         "Returns the hint level with a description of the expected specificity."
     )
 
-    def __init__(self) -> None:
+    def __init__(self, escalation_threshold: int = _ESCALATION_THRESHOLD) -> None:
         # problem_id -> total hint count for that problem
         self._problem_hint_counts: dict[str, int] = {}
+        self._escalation_threshold = escalation_threshold
 
     def use(self, tool_input: str) -> str:
         try:
@@ -66,9 +72,9 @@ class GetHintLevelTool(AbstractTool):
         # Deterministic severity → hint level mapping
         base_level = SEVERITY_TO_LEVEL.get(inp.severity.lower(), 2)
 
-        # Apply override if provided (clamped to [1, 4])
+        # Apply override if provided (clamped to [1, 5])
         if inp.hint_level_override is not None:
-            base_level = max(1, min(4, inp.hint_level_override))
+            base_level = max(1, min(5, inp.hint_level_override))
 
         # Stateful escalation based on problem_id
         level = base_level
@@ -77,13 +83,18 @@ class GetHintLevelTool(AbstractTool):
             hint_count = self._problem_hint_counts.get(inp.problem_id, 0)
             self._problem_hint_counts[inp.problem_id] = hint_count + 1
 
-            # Auto-escalate: after _ESCALATION_THRESHOLD hints, bump level
-            escalation_bumps = hint_count // _ESCALATION_THRESHOLD
-            level = min(4, base_level + escalation_bumps)
+            # Auto-escalate: after threshold hints, bump level
+            escalation_bumps = hint_count // self._escalation_threshold
+            level = min(5, base_level + escalation_bumps)
 
         description = HINT_LEVEL_DESCRIPTIONS.get(level, HINT_LEVEL_DESCRIPTIONS[2])
 
         result = f"Hint Level: {level}\nDescription: {description}"
+        if level == 5:
+            result += (
+                "\nESCALATION: Provide a worked example using DIFFERENT "
+                "numbers/context. Do NOT use the student's actual problem values."
+            )
         if inp.problem_id and hint_count > 0:
             result += f"\nHint count for this problem: {hint_count + 1}"
             if level > base_level:

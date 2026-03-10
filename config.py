@@ -9,6 +9,7 @@ Supports loading from:
 - YAML file: TutorConfig.from_yaml("config.yaml")
 """
 
+import dataclasses
 import os
 import logging
 from dataclasses import dataclass
@@ -18,18 +19,32 @@ from typing import Any, Callable, Optional
 logger = logging.getLogger(__name__)
 
 
+def _parse_bool(v: str) -> bool:
+    return v.lower() in ("true", "1", "yes")
+
+
 @dataclass
 class TutorConfig:
     """Configuration for the FAIR_LLM Tutor system."""
 
     # Model settings (HuggingFace only)
     model_name: str = "Qwen/Qwen2.5-14B-Instruct"
-    max_new_tokens: int = 1000
+    max_new_tokens: int = 400
     quantized: bool = False
     auth_token: str = ""
 
     # Agent step limit
     max_steps: int = 10
+
+    # Safety settings
+    max_input_length: int = 2000
+
+    # Pedagogical settings
+    escalation_threshold: int = 3
+
+    # LLM generation settings
+    stream: bool = False
+    verbose: bool = False
 
     # RAG settings
     collection_name: str = "course_materials"
@@ -44,9 +59,13 @@ class TutorConfig:
         env_map: dict[str, tuple[str, Callable[[str], Any]]] = {
             "FAIR_LLM_MODEL_NAME": ("model_name", str),
             "FAIR_LLM_MAX_NEW_TOKENS": ("max_new_tokens", int),
-            "FAIR_LLM_QUANTIZED": ("quantized", lambda v: v.lower() in ("true", "1", "yes")),
+            "FAIR_LLM_QUANTIZED": ("quantized", _parse_bool),
             "FAIR_LLM_AUTH_TOKEN": ("auth_token", str),
             "FAIR_LLM_MAX_STEPS": ("max_steps", int),
+            "FAIR_LLM_MAX_INPUT_LENGTH": ("max_input_length", int),
+            "FAIR_LLM_ESCALATION_THRESHOLD": ("escalation_threshold", int),
+            "FAIR_LLM_STREAM": ("stream", _parse_bool),
+            "FAIR_LLM_VERBOSE": ("verbose", _parse_bool),
             "FAIR_LLM_COLLECTION_NAME": ("collection_name", str),
             "FAIR_LLM_CHROMADB_PERSIST_PATH": ("chromadb_persist_path", str),
             "FAIR_LLM_RAG_TOP_K": ("rag_top_k", int),
@@ -75,7 +94,8 @@ class TutorConfig:
         with open(filepath, "r") as f:
             data = yaml.safe_load(f) or {}
 
-        config = cls(**{k: v for k, v in data.items() if hasattr(cls, k)})
+        field_names = {f.name for f in dataclasses.fields(cls)}
+        config = cls(**{k: v for k, v in data.items() if k in field_names})
 
         # Apply env overrides on top
         env_config = cls.from_env()
@@ -87,7 +107,7 @@ class TutorConfig:
 
         return config
 
-    def validate(self) -> list:
+    def validate(self) -> list[str]:
         """Validate config and return list of warnings."""
         warnings = []
 

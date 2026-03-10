@@ -4,6 +4,8 @@ Maintains structured state about problem progression across turns,
 preventing context drift after memory compression.
 """
 
+from enum import Enum
+
 from pydantic import ValidationError
 
 from fairlib.core.interfaces.tools import AbstractTool
@@ -11,12 +13,17 @@ from fairlib.core.interfaces.tools import AbstractTool
 from tools.schemas import ConversationStateAction, ConversationStateInput
 
 
+class ProblemStatus(str, Enum):
+    ACTIVE = "active"
+    SOLVED = "solved"
+
+
 class ProblemState:
     __slots__ = ("text", "status", "correct_turns")
 
     def __init__(self, text: str) -> None:
         self.text = text
-        self.status: str = "active"
+        self.status: ProblemStatus = ProblemStatus.ACTIVE
         self.correct_turns: int = 0
 
 
@@ -75,7 +82,7 @@ class ConversationStateTool(AbstractTool):
             lines.append("Current problem: none")
 
         solved = [
-            pid for pid, p in self._problems.items() if p.status == "solved"
+            pid for pid, p in self._problems.items() if p.status == ProblemStatus.SOLVED
         ]
         if solved:
             lines.append(f"Solved problems: {', '.join(solved)}")
@@ -97,10 +104,10 @@ class ConversationStateTool(AbstractTool):
 
         if inp.mark_solved:
             if inp.mark_solved in self._problems:
-                self._problems[inp.mark_solved].status = "solved"
+                self._problems[inp.mark_solved].status = ProblemStatus.SOLVED
             else:
                 prob = ProblemState(text=inp.mark_solved)
-                prob.status = "solved"
+                prob.status = ProblemStatus.SOLVED
                 self._problems[inp.mark_solved] = prob
             changes.append(f"Problem '{inp.mark_solved}' marked solved")
 

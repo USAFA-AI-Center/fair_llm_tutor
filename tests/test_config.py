@@ -21,7 +21,7 @@ class TestTutorConfigDefaults:
 
     def test_default_max_new_tokens(self):
         config = TutorConfig()
-        assert config.max_new_tokens == 1000
+        assert config.max_new_tokens == 400
 
     def test_default_max_steps(self):
         config = TutorConfig()
@@ -92,7 +92,7 @@ class TestTutorConfigFromEnv:
         monkeypatch.setenv("FAIR_LLM_MAX_NEW_TOKENS", "not_a_number")
         config = TutorConfig.from_env()
         # Should fall back to default
-        assert config.max_new_tokens == 1000
+        assert config.max_new_tokens == 400
 
     def test_no_env_vars_uses_defaults(self):
         # Ensure none of our env vars are set

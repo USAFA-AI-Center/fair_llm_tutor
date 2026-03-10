@@ -1,3 +1,7 @@
+# Generated session data
+sessions/*.jsonl
+sessions/*.scored.jsonl
+
 # Ignore files created by the demos
 demos/outputs/
 demos/coding_autograder_files/reports/

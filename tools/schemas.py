@@ -5,7 +5,6 @@ via these models for structured validation.
 """
 
 from enum import Enum
-from typing import List, Optional
 
 from pydantic import BaseModel
 
@@ -32,14 +31,14 @@ class RetrievalInput(BaseModel):
 
 class HistoryCheckInput(BaseModel):
     correct_answer: str
-    student_history: List[str] = []
+    student_history: list[str] = []
 
 
 class HintLevelInput(BaseModel):
     severity: str = "Major"
-    hint_level_override: Optional[int] = None
-    problem_id: Optional[str] = None
-    mark_complete: Optional[bool] = None
+    hint_level_override: int | None = None
+    problem_id: str | None = None
+    mark_complete: bool | None = None
 
 
 # --- Conversation state tool I/O ---
@@ -51,8 +50,8 @@ class ConversationStateAction(str, Enum):
 
 class ConversationStateInput(BaseModel):
     action: ConversationStateAction
-    set_current_problem: Optional[str] = None
-    problem_text: Optional[str] = None
-    mark_solved: Optional[str] = None
+    set_current_problem: str | None = None
+    problem_text: str | None = None
+    mark_solved: str | None = None
     increment_correct_turns: bool = False
     reset_correct_turns: bool = False

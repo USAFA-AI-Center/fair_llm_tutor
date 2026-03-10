@@ -136,6 +136,70 @@ class TestMathAwareMatching:
         assert "STUDENT_ALREADY_ANSWERED: YES" in result
 
 
+class TestNewPrefixPatterns:
+    """Tests for newly added answer prefix patterns."""
+
+    def setup_method(self):
+        self.tool = CheckStudentHistoryTool()
+
+    def test_i_believe_prefix(self):
+        result = self.tool.use(json.dumps({
+            "correct_answer": "42",
+            "student_history": ["i believe 42"],
+        }))
+        assert "STUDENT_ALREADY_ANSWERED: YES" in result
+
+    def test_it_should_be_prefix(self):
+        result = self.tool.use(json.dumps({
+            "correct_answer": "42",
+            "student_history": ["it should be 42"],
+        }))
+        assert "STUDENT_ALREADY_ANSWERED: YES" in result
+
+    def test_the_result_is_prefix(self):
+        result = self.tool.use(json.dumps({
+            "correct_answer": "42",
+            "student_history": ["the result is 42"],
+        }))
+        assert "STUDENT_ALREADY_ANSWERED: YES" in result
+
+    def test_i_calculated_prefix(self):
+        result = self.tool.use(json.dumps({
+            "correct_answer": "42",
+            "student_history": ["i calculated 42"],
+        }))
+        assert "STUDENT_ALREADY_ANSWERED: YES" in result
+
+    def test_the_solution_is_prefix(self):
+        result = self.tool.use(json.dumps({
+            "correct_answer": "42",
+            "student_history": ["the solution is 42"],
+        }))
+        assert "STUDENT_ALREADY_ANSWERED: YES" in result
+
+
+class TestEpsilonComparison:
+    """Tests for configurable epsilon in numeric comparison."""
+
+    def test_default_epsilon_is_forgiving(self):
+        """0.333 vs 0.33333 should match with default epsilon of 1e-4."""
+        tool = CheckStudentHistoryTool()
+        result = tool.use(json.dumps({
+            "correct_answer": "0.33333",
+            "student_history": ["0.3333"],
+        }))
+        assert "STUDENT_ALREADY_ANSWERED: YES" in result
+
+    def test_custom_epsilon(self):
+        """Custom tight epsilon should reject near-miss."""
+        tool = CheckStudentHistoryTool(epsilon=1e-8)
+        result = tool.use(json.dumps({
+            "correct_answer": "0.33333",
+            "student_history": ["0.3333"],
+        }))
+        assert "STUDENT_ALREADY_ANSWERED: NO" in result
+
+
 class TestNormalizeMath:
     """Unit tests for the normalization helper."""
 
