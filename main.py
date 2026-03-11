@@ -19,6 +19,7 @@ The system will:
 import asyncio
 import json
 import logging
+import re
 import sys
 import argparse
 from pathlib import Path
@@ -53,6 +54,72 @@ from tools.sanitize import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Patterns that indicate leaked internal reasoning
+_LEAKED_PREFIXES_RE = re.compile(
+    r"^\s*(?:Thought|Action|Observation|ACTION PLAN)\s*:",
+    re.IGNORECASE,
+)
+_FRAMEWORK_FALLBACK_RE = re.compile(
+    r"^Agent stopped after reaching max steps\.?$",
+    re.IGNORECASE,
+)
+_FINAL_ANSWER_PREFIX_RE = re.compile(
+    r"^\s*Final\s+Answer\s*:\s*",
+    re.IGNORECASE,
+)
+_FINAL_ANSWER_ANYWHERE_RE = re.compile(
+    r"Final\s+Answer\s*:\s*",
+    re.IGNORECASE,
+)
+_TOOL_LINE_RE = re.compile(r"^\s*(?:\{|tool_)", re.IGNORECASE)
+
+_GRACEFUL_FALLBACK = (
+    "Let me think about this differently. "
+    "Could you try rephrasing your question or showing me your work step by step?"
+)
+
+
+def sanitize_tutor_response(response: str) -> str:
+    """Strip leaked internal reasoning from tutor responses before displaying.
+
+    Defence-in-depth: catches leaked Thought/Action/Observation chains,
+    framework error messages, and 'Final Answer:' prefixes that should
+    never reach the student.
+    """
+    if not response:
+        return _GRACEFUL_FALLBACK
+
+    # Replace framework max-steps message with a graceful fallback
+    if _FRAMEWORK_FALLBACK_RE.match(response.strip()):
+        return _GRACEFUL_FALLBACK
+
+    text = response
+
+    # If the response starts with internal reasoning, try to extract
+    # useful content after the last "Final Answer:" occurrence first
+    if _LEAKED_PREFIXES_RE.match(text):
+        fa_match = _FINAL_ANSWER_ANYWHERE_RE.search(text)
+        if fa_match:
+            text = text[fa_match.end():].strip()
+        else:
+            # No final answer found — strip lines that look like
+            # internal reasoning or tool calls
+            lines = text.split("\n")
+            clean_lines = [
+                line for line in lines
+                if not _LEAKED_PREFIXES_RE.match(line)
+                and not _TOOL_LINE_RE.match(line)
+            ]
+            text = "\n".join(clean_lines).strip()
+    elif _FINAL_ANSWER_PREFIX_RE.match(text):
+        # Strip "Final Answer:" prefix (benign but unprofessional)
+        text = _FINAL_ANSWER_PREFIX_RE.sub("", text, count=1).strip()
+
+    if not text or len(text) < 10:
+        return _GRACEFUL_FALLBACK
+
+    return text
 
 
 class TutorSession:
@@ -222,6 +289,11 @@ class TutorSession:
         logger.info("Processing student work through agent...")
 
         response = await self.agent.arun(request)
+
+        logger.info("tutor_response_raw: %s", response)
+
+        # Defence-in-depth: sanitize any leaked internal reasoning
+        response = sanitize_tutor_response(response)
 
         logger.info("tutor_response: %s", response)
 

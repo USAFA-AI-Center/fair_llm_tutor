@@ -33,8 +33,8 @@ class TutorConfig:
     quantized: bool = False
     auth_token: str = ""
 
-    # Agent step limit
-    max_steps: int = 10
+    # Agent step limit (12 provides headroom for multi-tool turns)
+    max_steps: int = 12
 
     # Safety settings
     max_input_length: int = 2000

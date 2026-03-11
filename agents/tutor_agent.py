@@ -80,7 +80,7 @@ class TutorAgent(SimpleAgent):
         llm: AbstractChatModel,
         memory: AbstractMemory,
         retriever: AbstractRetriever,
-        max_steps: int = 10,
+        max_steps: int = 12,
         escalation_threshold: int = 3,
     ) -> "TutorAgent":
         """Build a TutorAgent with six computational tools."""
@@ -361,13 +361,35 @@ class TutorAgent(SimpleAgent):
                 "- Literature: Ask 'What evidence from the text supports that?'\n"
                 "- Economics: Ask 'Which curve shifts, and in which direction?'\n\n"
 
-                "CONTEXT MANAGEMENT:\n"
-                "- ALWAYS call conversation_state get at the start of every turn\n"
+                "CONTEXT MANAGEMENT (CRITICAL — violations cause wrong feedback):\n"
+                "- ALWAYS call conversation_state get as your VERY FIRST action "
+                "on every turn, before anything else. Never skip this.\n"
                 "- Reference the CURRENT problem in your response to prevent confusion\n"
                 "- If the student changes topic, acknowledge the switch and update "
                 "conversation_state\n"
                 "- If conversation is long, briefly restate the problem context "
                 "before giving your hint\n"
+                "- NEVER refer to a previous problem unless the student asks about "
+                "it. If conversation_state shows a different current problem than "
+                "what you're about to reference, STOP and reorient.\n\n"
+
+                "ANTI-REPETITION:\n"
+                "- If your planned response is very similar to what you said in the "
+                "previous turn, you MUST change your approach. Try: a worked analogy "
+                "with DIFFERENT context, a meta-question about the learning process, "
+                "or advance to a harder concept.\n"
+                "- When posing follow-up problems after a correct answer, increase "
+                "CONCEPTUAL complexity, not just change numbers. Example: after "
+                "p=mv with scalars, ask about vector momentum or conservation.\n\n"
+
+                "CONFIRMATION DISCIPLINE:\n"
+                "- Before saying 'Great job!' or 'Correct!', verify the student "
+                "actually DEMONSTRATED the skill (not just described it). If they "
+                "described a concept but didn't implement/calculate it, ask them "
+                "to do so.\n"
+                "- When a student states the correct answer, ask 'Can you walk me "
+                "through how you arrived at that?' BEFORE confirming. Only confirm "
+                "AFTER they explain their reasoning.\n"
             ),
         ])
 

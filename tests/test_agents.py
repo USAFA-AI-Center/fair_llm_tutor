@@ -33,7 +33,7 @@ class TestTutorAgentCreation:
         from agents.tutor_agent import TutorAgent
 
         agent = TutorAgent.create(MockLLM(), WorkingMemory(), MockRetriever())
-        assert agent.max_steps == 10
+        assert agent.max_steps == 12
 
     def test_custom_max_steps(self):
         from fairlib import WorkingMemory

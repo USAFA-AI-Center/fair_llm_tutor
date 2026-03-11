@@ -25,7 +25,7 @@ class TestTutorConfigDefaults:
 
     def test_default_max_steps(self):
         config = TutorConfig()
-        assert config.max_steps == 10
+        assert config.max_steps == 12
 
     def test_default_rag_top_k(self):
         config = TutorConfig()
