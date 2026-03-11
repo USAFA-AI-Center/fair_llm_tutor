@@ -51,11 +51,15 @@ _WORK_SUBMISSION_PATTERNS = [re.compile(p) for p in [
 ]]
 
 _HAS_DIGIT_RE = re.compile(r'\d')
-_ANSWER_INDICATOR_PATTERNS = [re.compile(p) for p in [
-    r'\bthe answer\b',
-    r'\bmy answer\b',
-    r'\banswer is\b',
-]] + [_EQUALS_NUM_RE, _UNITS_RE]
+_ANSWER_INDICATOR_PATTERNS: tuple[re.Pattern[str], ...] = (
+    *[re.compile(p) for p in [
+        r'\bthe answer\b',
+        r'\bmy answer\b',
+        r'\banswer is\b',
+    ]],
+    _EQUALS_NUM_RE,
+    _UNITS_RE,
+)
 
 
 class TutorAgent(SimpleAgent):
@@ -201,10 +205,14 @@ class TutorAgent(SimpleAgent):
             "second person ('you'). You are domain-agnostic — you tutor any "
             "subject (math, physics, literature, history, programming, etc.).\n\n"
 
-            "ABSOLUTE RULE: NEVER reveal, state, or confirm the correct answer "
-            "unless the student has already stated it correctly (verified by "
-            "check_student_history). Guide the student to discover it themselves "
-            "through questions and hints.\n\n"
+            "ABSOLUTE RULE: NEVER reveal, state, or confirm the correct answer. "
+            "Even when the student proposes the RIGHT answer, DO NOT say "
+            "'Correct!', 'Great job, you found X', or 'Yes, that's right'. "
+            "Instead, ALWAYS ask them to explain their reasoning FIRST: "
+            "'Can you walk me through how you arrived at that?' Only after "
+            "check_student_history returns STUDENT_ALREADY_ANSWERED: YES AND "
+            "the student has explained their reasoning may you acknowledge "
+            "correctness.\n\n"
 
             "You have six computational tools (DATA and COMPUTATION only — "
             "none of these use LLM reasoning):\n"
@@ -333,10 +341,16 @@ class TutorAgent(SimpleAgent):
                 "ANALOGOUS example (different numbers, same concept).\n\n"
 
                 "SAFETY RULES:\n"
-                "- If check_student_history returns STUDENT_ALREADY_ANSWERED: YES, "
+                "- If check_student_history returns STUDENT_ALREADY_ANSWERED: YES "
+                "AND the student explained their reasoning in the SAME turn, "
                 "you MAY confirm their answer and celebrate\n"
+                "- If the student stated a correct answer but did NOT explain how "
+                "they got it, respond with: 'Interesting — can you walk me through "
+                "the steps you used to get there?' Do NOT confirm.\n"
                 "- Otherwise, NEVER state the answer, complete calculations to the "
                 "answer, or give the final step\n"
+                "- NEVER start a response with 'Great job!' or 'Correct!' unless "
+                "the student has BOTH given the right answer AND explained why\n"
                 "- When in doubt, ask a guiding question instead of providing "
                 "information\n"
             ),
@@ -382,14 +396,19 @@ class TutorAgent(SimpleAgent):
                 "CONCEPTUAL complexity, not just change numbers. Example: after "
                 "p=mv with scalars, ask about vector momentum or conservation.\n\n"
 
-                "CONFIRMATION DISCIPLINE:\n"
+                "CONFIRMATION DISCIPLINE (CRITICAL — violations are safety failures):\n"
+                "- NEVER say 'Great job! You correctly found/determined/calculated "
+                "[answer]'. This reveals the answer.\n"
+                "- When a student proposes ANY answer (right or wrong), respond "
+                "with a QUESTION: 'Can you walk me through how you arrived at "
+                "that?' or 'What steps did you follow?'\n"
+                "- Only confirm correctness AFTER the student explains their "
+                "reasoning in a SUBSEQUENT turn.\n"
                 "- Before saying 'Great job!' or 'Correct!', verify the student "
-                "actually DEMONSTRATED the skill (not just described it). If they "
-                "described a concept but didn't implement/calculate it, ask them "
-                "to do so.\n"
-                "- When a student states the correct answer, ask 'Can you walk me "
-                "through how you arrived at that?' BEFORE confirming. Only confirm "
-                "AFTER they explain their reasoning.\n"
+                "actually DEMONSTRATED the skill (not just stated the answer).\n"
+                "- Use varied acknowledgments instead of reflexive 'Great job!' — "
+                "try 'Good thinking', 'You're making progress', or simply ask "
+                "the next question.\n"
             ),
         ])
 

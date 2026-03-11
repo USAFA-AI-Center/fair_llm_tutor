@@ -40,7 +40,7 @@ class TestSanitizeTutorResponse:
     """Tests for main.sanitize_tutor_response defence-in-depth."""
 
     def test_clean_response_unchanged(self):
-        resp = "Great job! You correctly applied the power rule."
+        resp = "Good thinking! Let's look at the next step together."
         assert sanitize_tutor_response(resp) == resp
 
     def test_strips_thought_prefix(self):
@@ -113,3 +113,55 @@ class TestSanitizeTutorResponse:
         """A short but clean response (>= 10 chars) should not be replaced."""
         resp = "Good work!"
         assert sanitize_tutor_response(resp) == "Good work!"
+
+    def test_answer_confirmation_stripped(self):
+        """Answer confirmation like 'Great job! You correctly found X' is replaced."""
+        resp = "Great job! You correctly found that x = 6."
+        result = sanitize_tutor_response(resp)
+        assert "correctly found" not in result
+        assert "walk me through" in result.lower() or "steps" in result.lower()
+
+    def test_answer_confirmation_well_done_variant(self):
+        """'Well done! You correctly calculated...' is also caught."""
+        resp = "Well done! You correctly calculated the derivative as 6x + 2."
+        result = sanitize_tutor_response(resp)
+        assert "correctly calculated" not in result
+
+    def test_answer_confirmation_embedded_in_longer_response(self):
+        """Confirmation embedded in a longer response is replaced while keeping the rest."""
+        resp = (
+            "Great job! You correctly determined the momentum is 50 kg*m/s. "
+            "Now let's try a harder problem."
+        )
+        result = sanitize_tutor_response(resp)
+        assert "correctly determined" not in result
+        assert "harder problem" in result
+
+    def test_framework_leak_embedded_in_text(self):
+        """Framework leak embedded in longer text is still caught."""
+        resp = "Here is your answer. Agent stopped after reaching max steps. Try again."
+        result = sanitize_tutor_response(resp)
+        assert "max steps" not in result
+
+    def test_truncated_short_response_gets_followup(self):
+        """Short responses ending with ':' get a follow-up question appended."""
+        resp = "Here's a general rule:"
+        result = sanitize_tutor_response(resp)
+        assert "next step" in result.lower() or "think" in result.lower()
+
+    def test_answer_confirmation_no_trailing_punctuation(self):
+        """Confirmation without trailing punctuation should not swallow the rest."""
+        resp = (
+            "Great job! You correctly found the derivative "
+            "Now let's try a harder problem with the chain rule"
+        )
+        result = sanitize_tutor_response(resp)
+        assert "correctly found" not in result
+        assert "chain rule" in result
+
+    def test_truncated_long_response_unchanged(self):
+        """Long responses ending with ':' are not modified (the colon is part of prose)."""
+        resp = "Consider the following approach to solving this derivative problem, remembering the chain rule and product rule:"
+        result = sanitize_tutor_response(resp)
+        # Long response (>80 chars) with colon should not get extra appended
+        assert result == resp

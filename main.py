@@ -61,7 +61,7 @@ _LEAKED_PREFIXES_RE = re.compile(
     re.IGNORECASE,
 )
 _FRAMEWORK_FALLBACK_RE = re.compile(
-    r"^Agent stopped after reaching max steps\.?$",
+    r"Agent stopped after reaching max steps\.?",
     re.IGNORECASE,
 )
 _FINAL_ANSWER_PREFIX_RE = re.compile(
@@ -74,13 +74,29 @@ _FINAL_ANSWER_ANYWHERE_RE = re.compile(
 )
 _TOOL_LINE_RE = re.compile(r"^\s*(?:\{|tool_)", re.IGNORECASE)
 
+# Matches "Great job! You correctly found/determined/calculated [answer]"
+_ANSWER_CONFIRMATION_RE = re.compile(
+    r"(?:Great job|Correct|Excellent|Well done|Right)[!.]?\s*"
+    r"(?:You(?:'ve| have)?\s+)?(?:correctly|successfully|accurately)\s+"
+    r"(?:found|determined|calculated|identified|got|solved|derived|computed)\b"
+    r"(?:\s+\S+){0,8}[.!?]?",
+    re.IGNORECASE,
+)
+
+# Matches truncated responses ending with ":" and no content after
+_TRUNCATED_RESPONSE_RE = re.compile(r":\s*$")
+
 _GRACEFUL_FALLBACK = (
     "Let me think about this differently. "
     "Could you try rephrasing your question or showing me your work step by step?"
 )
 
+_CONFIRMATION_REPLACEMENT = (
+    "Interesting approach! Can you walk me through the steps you used to get there?"
+)
 
-def sanitize_tutor_response(response: str) -> str:
+
+def sanitize_tutor_response(response: str | None) -> str:
     """Strip leaked internal reasoning from tutor responses before displaying.
 
     Defence-in-depth: catches leaked Thought/Action/Observation chains,
@@ -91,7 +107,8 @@ def sanitize_tutor_response(response: str) -> str:
         return _GRACEFUL_FALLBACK
 
     # Replace framework max-steps message with a graceful fallback
-    if _FRAMEWORK_FALLBACK_RE.match(response.strip()):
+    # Use search instead of match to catch it embedded in longer responses
+    if _FRAMEWORK_FALLBACK_RE.search(response.strip()):
         return _GRACEFUL_FALLBACK
 
     text = response
@@ -115,6 +132,18 @@ def sanitize_tutor_response(response: str) -> str:
     elif _FINAL_ANSWER_PREFIX_RE.match(text):
         # Strip "Final Answer:" prefix (benign but unprofessional)
         text = _FINAL_ANSWER_PREFIX_RE.sub("", text, count=1).strip()
+
+    if not text or len(text) < 10:
+        return _GRACEFUL_FALLBACK
+
+    # Defence-in-depth: strip answer confirmation patterns
+    # ("Great job! You correctly found X" → probe for reasoning instead)
+    if _ANSWER_CONFIRMATION_RE.search(text):
+        text = _ANSWER_CONFIRMATION_RE.sub(_CONFIRMATION_REPLACEMENT, text).strip()
+
+    # Catch truncated responses ending with ":" and no content
+    if _TRUNCATED_RESPONSE_RE.search(text) and len(text) < 80:
+        text += " What do you think the next step would be?"
 
     if not text or len(text) < 10:
         return _GRACEFUL_FALLBACK
