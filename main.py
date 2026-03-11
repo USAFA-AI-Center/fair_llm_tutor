@@ -74,12 +74,30 @@ _FINAL_ANSWER_ANYWHERE_RE = re.compile(
 )
 _TOOL_LINE_RE = re.compile(r"^\s*(?:\{|tool_)", re.IGNORECASE)
 
+# Shared verb list for answer-confirmation patterns
+_CONFIRMATION_VERBS = (
+    r"found|determined|calculated|identified|got|solved|derived|computed|applied|shown"
+)
+
 # Matches "Great job! You correctly found/determined/calculated [answer]"
+# Also matches "You correctly derived/applied ..." without leading praise word
 _ANSWER_CONFIRMATION_RE = re.compile(
-    r"(?:Great job|Correct|Excellent|Well done|Right)[!.]?\s*"
-    r"(?:You(?:'ve| have)?\s+)?(?:correctly|successfully|accurately)\s+"
-    r"(?:found|determined|calculated|identified|got|solved|derived|computed)\b"
+    r"(?:(?:Great job|Correct|Excellent|Well done|Right)[!.]?\s*)?"
+    r"You(?:'ve| have)?\s+(?:correctly|successfully|accurately)\s+"
+    rf"(?:{_CONFIRMATION_VERBS})\b"
     r"(?:\s+\S+){0,8}[.!?]?",
+    re.IGNORECASE,
+)
+
+# Matches direct answer statements that include a concrete value:
+# "the answer is 42", "simplifies to 6x + 2", "is indeed x = 6"
+# Requires digits or '=' after the trigger phrase to avoid false positives
+# on Socratic questions like "Does the answer match what you expected?"
+_DIRECT_ANSWER_RE = re.compile(
+    r"(?:the\s+(?:answer|result|solution|value)|"
+    r"(?:simplifies?|reduces?|equals?|evaluates?)\s+to|"
+    r"is\s+indeed)\s+"
+    r"(?:[^.!?\n]{0,20}(?:\d|=)[^.!?\n]{0,40})",
     re.IGNORECASE,
 )
 
@@ -93,6 +111,9 @@ _GRACEFUL_FALLBACK = (
 
 _CONFIRMATION_REPLACEMENT = (
     "Interesting approach! Can you walk me through the steps you used to get there?"
+)
+_DIRECT_ANSWER_REPLACEMENT = (
+    "Let's check your reasoning. Can you walk me through your steps?"
 )
 
 
@@ -140,6 +161,10 @@ def sanitize_tutor_response(response: str | None) -> str:
     # ("Great job! You correctly found X" → probe for reasoning instead)
     if _ANSWER_CONFIRMATION_RE.search(text):
         text = _ANSWER_CONFIRMATION_RE.sub(_CONFIRMATION_REPLACEMENT, text).strip()
+
+    # Strip direct answer statements like "the derivative is 6x + 2"
+    if _DIRECT_ANSWER_RE.search(text):
+        text = _DIRECT_ANSWER_RE.sub(_DIRECT_ANSWER_REPLACEMENT, text).strip()
 
     # Catch truncated responses ending with ":" and no content
     if _TRUNCATED_RESPONSE_RE.search(text) and len(text) < 80:

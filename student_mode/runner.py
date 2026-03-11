@@ -33,6 +33,7 @@ import argparse
 import json
 import logging
 import re
+import sys
 import time
 import uuid
 from datetime import datetime, timezone
@@ -130,7 +131,7 @@ def run_session(
     course_path = Path(course_materials)
     if ".." in course_path.parts or course_path.is_absolute():
         raise ValueError(f"Invalid course_materials path: {course_materials}")
-    cmd_list = ["python", "main.py", "--course_materials", course_materials, "--log-level", log_level]
+    cmd_list = [sys.executable, "main.py", "--course_materials", course_materials, "--log-level", log_level]
     if tutor_config:
         cmd_list.extend(["--config", tutor_config])
 
