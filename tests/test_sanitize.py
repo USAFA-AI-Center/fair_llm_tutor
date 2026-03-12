@@ -150,10 +150,26 @@ class TestSanitizeTutorResponse:
         assert "next step" in result.lower() or "think" in result.lower()
 
     def test_answer_confirmation_no_trailing_punctuation(self):
-        """Confirmation without trailing punctuation should not swallow the rest."""
+        """Confirmation without trailing punctuation gets full sentence removed.
+
+        When the confirmation and follow-up are in the same sentence (no
+        sentence-ending punctuation between them), the entire sentence is
+        removed to prevent answer fragments from leaking through.
+        """
         resp = (
             "Great job! You correctly found the derivative "
             "Now let's try a harder problem with the chain rule"
+        )
+        result = sanitize_tutor_response(resp)
+        assert "correctly found" not in result
+        # The follow-up is in the same un-punctuated sentence, so it
+        # gets removed along with the confirmation to prevent leaks.
+
+    def test_answer_confirmation_separate_sentences_preserves_rest(self):
+        """When confirmation and follow-up are separate sentences, follow-up survives."""
+        resp = (
+            "Great job! You correctly found the derivative. "
+            "Now let's try a harder problem with the chain rule."
         )
         result = sanitize_tutor_response(resp)
         assert "correctly found" not in result

@@ -77,27 +77,38 @@ _TOOL_LINE_RE = re.compile(r"^\s*(?:\{|tool_)", re.IGNORECASE)
 # Shared verb list for answer-confirmation patterns
 _CONFIRMATION_VERBS = (
     r"found|determined|calculated|identified|got|solved|derived|computed|applied|shown"
+    r"|rewrote|implemented|understood|recognized|demonstrated|verified|traced|wrote"
 )
 
-# Matches "Great job! You correctly found/determined/calculated [answer]"
-# Also matches "You correctly derived/applied ..." without leading praise word
+# Matches the FULL sentence containing an answer confirmation.
+# Captures from an optional leading praise word through to the next sentence
+# boundary (period, exclamation, or question mark followed by space/end).
+# This prevents leftover answer fragments after the match.
 _ANSWER_CONFIRMATION_RE = re.compile(
-    r"(?:(?:Great job|Correct|Excellent|Well done|Right)[!.]?\s*)?"
-    r"You(?:'ve| have)?\s+(?:correctly|successfully|accurately)\s+"
+    r"(?:(?:Great job|Correct|Excellent|Well done|Right|Fantastic|Fantastic job|"
+    r"Brilliant|Perfect|Wonderful|Superb|Bravo|Nice work|Good work|Outstanding)"
+    r"[!.]?\s*)?"
+    r"You(?:'ve| have)?\s+(?:correctly|successfully|accurately|properly)\s+"
     rf"(?:{_CONFIRMATION_VERBS})\b"
-    r"(?:\s+\S+){0,8}[.!?]?",
+    r"[^.!?\n]*[.!?]?",
     re.IGNORECASE,
 )
 
 # Matches direct answer statements that include a concrete value:
-# "the answer is 42", "simplifies to 6x + 2", "is indeed x = 6"
-# Requires digits or '=' after the trigger phrase to avoid false positives
-# on Socratic questions like "Does the answer match what you expected?"
+# "the answer is 42", "simplifies to 6x + 2", "is indeed x = 6",
+# "as \( f'(x) = 6x + 2 \)", "giving us 12x^2 - 12x + 3"
 _DIRECT_ANSWER_RE = re.compile(
-    r"(?:the\s+(?:answer|result|solution|value)|"
-    r"(?:simplifies?|reduces?|equals?|evaluates?)\s+to|"
-    r"is\s+indeed)\s+"
-    r"(?:[^.!?\n]{0,20}(?:\d|=)[^.!?\n]{0,40})",
+    r"(?:the\s+(?:answer|result|solution|value|derivative|integral)|"
+    r"(?:simplifies?|reduces?|equals?|evaluates?|gives?|giving)\s+(?:us\s+)?to|"
+    r"is\s+indeed|"
+    r"as\s+\\?\(?\s*[a-zA-Z]'?\s*\\?\(?\s*[a-zA-Z]\s*\\?\)?\s*=)"
+    r"[^.!?\n]*(?:\d|=)[^.!?\n]*[.!?]?",
+    re.IGNORECASE,
+)
+
+# Matches LaTeX-style answers: \( f'(x) = ... \) or \( g'(x) = ... \)
+_LATEX_ANSWER_RE = re.compile(
+    r"\\\(\s*[a-zA-Z]'?\s*\([a-zA-Z]\)\s*=\s*[^\\)]+\\\)",
     re.IGNORECASE,
 )
 
@@ -109,12 +120,80 @@ _GRACEFUL_FALLBACK = (
     "Could you try rephrasing your question or showing me your work step by step?"
 )
 
-_CONFIRMATION_REPLACEMENT = (
-    "Interesting approach! Can you walk me through the steps you used to get there?"
-)
-_DIRECT_ANSWER_REPLACEMENT = (
-    "Let's check your reasoning. Can you walk me through your steps?"
-)
+# Varied replacements to avoid repetitive "Interesting approach!" on every turn
+_CONFIRMATION_REPLACEMENTS = [
+    "Can you walk me through the steps you used to get there?",
+    "What was your reasoning for each step?",
+    "How did you arrive at that? Walk me through your thinking.",
+    "Can you explain your approach step by step?",
+    "What method did you use? Show me your work.",
+]
+_DIRECT_ANSWER_REPLACEMENTS = [
+    "Let's check your reasoning. Can you walk me through your steps?",
+    "Before we continue, can you verify each step of your work?",
+    "Let's make sure you understand the process. What did you do first?",
+]
+
+_replacement_counter = 0
+
+
+def _get_confirmation_replacement() -> str:
+    """Rotate through replacement phrases to avoid repetition."""
+    global _replacement_counter
+    text = _CONFIRMATION_REPLACEMENTS[
+        _replacement_counter % len(_CONFIRMATION_REPLACEMENTS)
+    ]
+    _replacement_counter += 1
+    return text
+
+
+def _get_direct_answer_replacement() -> str:
+    """Rotate through direct-answer replacement phrases."""
+    global _replacement_counter
+    text = _DIRECT_ANSWER_REPLACEMENTS[
+        _replacement_counter % len(_DIRECT_ANSWER_REPLACEMENTS)
+    ]
+    _replacement_counter += 1
+    return text
+
+
+def _strip_sentences_with_answers(text: str) -> str:
+    """Remove full sentences that contain answer-confirming content.
+
+    Operates at the sentence level: splits on sentence boundaries, removes
+    sentences that match answer patterns, and reassembles. This prevents
+    leftover answer fragments that sentence-unaware regex sub would leave.
+    """
+    # Split into sentences (period/excl/question followed by space or end)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    clean = []
+    replaced = False
+    for sent in sentences:
+        if _ANSWER_CONFIRMATION_RE.search(sent):
+            if not replaced:
+                clean.append(_get_confirmation_replacement())
+                replaced = True
+            # Skip this sentence entirely — it contains the answer
+            continue
+        if _DIRECT_ANSWER_RE.search(sent):
+            if not replaced:
+                clean.append(_get_direct_answer_replacement())
+                replaced = True
+            continue
+        if _LATEX_ANSWER_RE.search(sent):
+            # Check if this sentence is affirming an answer
+            # (e.g., "You correctly rewrote ... as \( x^{-2} \) and applied...")
+            affirm_words = re.search(
+                r'\b(?:correctly|right|exactly|yes|correct)\b', sent, re.IGNORECASE
+            )
+            if affirm_words:
+                if not replaced:
+                    clean.append(_get_confirmation_replacement())
+                    replaced = True
+                continue
+        clean.append(sent)
+
+    return " ".join(clean).strip()
 
 
 def sanitize_tutor_response(response: str | None) -> str:
@@ -157,14 +236,12 @@ def sanitize_tutor_response(response: str | None) -> str:
     if not text or len(text) < 10:
         return _GRACEFUL_FALLBACK
 
-    # Defence-in-depth: strip answer confirmation patterns
-    # ("Great job! You correctly found X" → probe for reasoning instead)
-    if _ANSWER_CONFIRMATION_RE.search(text):
-        text = _ANSWER_CONFIRMATION_RE.sub(_CONFIRMATION_REPLACEMENT, text).strip()
-
-    # Strip direct answer statements like "the derivative is 6x + 2"
-    if _DIRECT_ANSWER_RE.search(text):
-        text = _DIRECT_ANSWER_RE.sub(_DIRECT_ANSWER_REPLACEMENT, text).strip()
+    # Defence-in-depth: strip full sentences containing answer confirmations
+    # or direct answer statements. Sentence-level removal prevents leftover
+    # answer fragments that word-level regex sub would leave.
+    if (_ANSWER_CONFIRMATION_RE.search(text) or _DIRECT_ANSWER_RE.search(text)
+            or _LATEX_ANSWER_RE.search(text)):
+        text = _strip_sentences_with_answers(text)
 
     # Catch truncated responses ending with ":" and no content
     if _TRUNCATED_RESPONSE_RE.search(text) and len(text) < 80:
