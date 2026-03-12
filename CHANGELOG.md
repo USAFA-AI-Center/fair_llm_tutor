@@ -4,6 +4,29 @@ All notable changes to the fair_llm_tutor project are documented here.
 
 ---
 
+## [Unreleased] — 2026-03-12
+
+Targeted improvements driven by run `run_20260312_153752` (13/17 scenarios).
+Baseline score: **3.35/5.00** → Previous run: **3.51/5.00** (+0.16).
+
+### Safety (P0) — 41 failure turns
+
+- **Added standalone praise filter** (`main.py`): New `_PRAISE_CONFIRMATION_RE` catches response-initial praise ("Excellent work!", "Great job!", "Well done!") that implicitly confirms a student's answer even without stating it. Replaced with neutral openers from `_NEUTRAL_OPENERS` list. Why: 41 turns scored safety <= 2; the judge flagged "Excellent work!" as implicit answer confirmation even when no explicit answer was stated.
+
+- **Strengthened confirmation discipline in prompt** (`agents/tutor_agent.py`): Added explicit instruction to NEVER start responses with praise unless `check_student_history` confirmed AND student explained reasoning. Instructs tutor to lead with substance ("Let's look at your approach...") instead of evaluative praise. Why: the tutor reflexively opened with "Great job!" which the judge treats as confirming correctness.
+
+### Correctness (P1) — 45 failure turns
+
+- **Strengthened context management** (`agents/tutor_agent.py`): Added two new rules: (1) "STAY ON THE ASSIGNED PROBLEM" — redirect students who drift to different problems (e.g., fibonacci when assignment is factorial); (2) After marking a problem solved, explicitly state the NEW problem before asking questions — never say "walk me through your steps for this one" without specifying which problem. Why: 45 turns scored domain_accuracy <= 2, primarily from the tutor following student tangents to unrelated problems or failing to specify the current problem after transitions.
+
+### Pedagogy (P2) — 54 failure turns + 66 helpfulness failures
+
+- **Anti-repetition overhaul** (`agents/tutor_agent.py`): Added explicit instruction to NEVER say "walk me through your steps" or "can you explain your reasoning" more than once per conversation. Added varied question form suggestions. Why: the derivatives session showed 6+ consecutive "walk me through your steps" turns, causing both pedagogy and helpfulness failures.
+
+- **Confusion handling** (`agents/tutor_agent.py`): Strengthened instructions for when students say "I'm confused" or "I already explained that" — tutor must stop current approach, restate the problem, and offer a concrete starting point instead of repeating the same question. Why: helpfulness failures (-0.11 regression) were driven by the tutor ignoring student confusion signals.
+
+---
+
 ## [Unreleased] — 2026-03-11
 
 Targeted improvements driven by the automated evaluation pipeline (`student_mode/pipeline.py`).

@@ -112,6 +112,27 @@ _LATEX_ANSWER_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Matches standalone praise at the START of a response that implicitly
+# confirms a correct answer without explicitly stating it.
+# E.g., "Excellent work! What was your reasoning..." or "Great job! Ready for..."
+_PRAISE_CONFIRMATION_RE = re.compile(
+    r"^(?:Excellent(?:\s+work)?|Great(?:\s+job)?|Well\s+done|Correct|"
+    r"Perfect|Brilliant|Wonderful|Superb|Bravo|Outstanding|Fantastic"
+    r"(?:\s+job)?|Nice\s+work|Good\s+work|Great\s+work|"
+    r"Great\s+(?:observation|understanding|thinking|approach|reasoning|questions)"
+    r")(?:\s*[!.])+\s*",
+    re.IGNORECASE,
+)
+
+# Neutral openers to replace praise confirmations
+_NEUTRAL_OPENERS = [
+    "Let's take a closer look. ",
+    "Interesting approach. ",
+    "I see your thinking. ",
+    "Let's work through this together. ",
+    "Good effort so far. ",
+]
+
 # Matches truncated responses ending with ":" and no content after
 _TRUNCATED_RESPONSE_RE = re.compile(r":\s*$")
 
@@ -153,6 +174,14 @@ def _get_direct_answer_replacement() -> str:
     text = _DIRECT_ANSWER_REPLACEMENTS[
         _replacement_counter % len(_DIRECT_ANSWER_REPLACEMENTS)
     ]
+    _replacement_counter += 1
+    return text
+
+
+def _get_praise_replacement() -> str:
+    """Rotate through neutral openers to replace implicit praise confirmations."""
+    global _replacement_counter
+    text = _NEUTRAL_OPENERS[_replacement_counter % len(_NEUTRAL_OPENERS)]
     _replacement_counter += 1
     return text
 
@@ -242,6 +271,12 @@ def sanitize_tutor_response(response: str | None) -> str:
     if (_ANSWER_CONFIRMATION_RE.search(text) or _DIRECT_ANSWER_RE.search(text)
             or _LATEX_ANSWER_RE.search(text)):
         text = _strip_sentences_with_answers(text)
+
+    # Strip standalone praise at start of response that implicitly confirms
+    # correctness (e.g., "Excellent work! Walk me through...").
+    # This must run AFTER sentence-level filtering above.
+    if _PRAISE_CONFIRMATION_RE.match(text):
+        text = _PRAISE_CONFIRMATION_RE.sub(_get_praise_replacement(), text, count=1)
 
     # Catch truncated responses ending with ":" and no content
     if _TRUNCATED_RESPONSE_RE.search(text) and len(text) < 80:

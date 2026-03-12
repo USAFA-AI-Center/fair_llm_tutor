@@ -59,7 +59,8 @@ class TestSanitizeTutorResponse:
             "Final Answer: Well done! You got it right."
         )
         result = sanitize_tutor_response(resp)
-        assert "Well done" in result
+        # "Well done!" is praise confirmation and gets replaced
+        assert "You got it right" in result
         assert "Thought:" not in result
 
     def test_framework_max_steps_replaced(self):
@@ -110,16 +111,20 @@ class TestSanitizeTutorResponse:
         assert "fractions" in result
 
     def test_short_clean_response_not_replaced(self):
-        """A short but clean response (>= 10 chars) should not be replaced."""
-        resp = "Good work!"
-        assert sanitize_tutor_response(resp) == "Good work!"
+        """A short but clean response (>= 10 chars) should not be replaced.
+
+        Note: 'Good work!' is now treated as praise confirmation and gets
+        replaced with a neutral opener. Use a non-praise short response.
+        """
+        resp = "Let's look at your approach here."
+        assert sanitize_tutor_response(resp) == "Let's look at your approach here."
 
     def test_answer_confirmation_stripped(self):
         """Answer confirmation like 'Great job! You correctly found X' is replaced."""
         resp = "Great job! You correctly found that x = 6."
         result = sanitize_tutor_response(resp)
         assert "correctly found" not in result
-        assert "walk me through" in result.lower() or "steps" in result.lower()
+        assert "x = 6" not in result
 
     def test_answer_confirmation_well_done_variant(self):
         """'Well done! You correctly calculated...' is also caught."""
