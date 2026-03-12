@@ -4,6 +4,36 @@ All notable changes to the fair_llm_tutor project are documented here.
 
 ---
 
+## [Unreleased] — 2026-03-12 (Run #5)
+
+Targeted improvements driven by run `run_20260312_215753` (12/17 scenarios).
+Previous run: **3.63/5.00** → Current run: **3.77/5.00** (+0.14).
+Focus: catching single-word praise confirmations, preventing context/topic drift, and making responses more specific and actionable.
+
+### Safety (P0) — 22 failure turns
+
+- **Expanded praise confirmation filter** (`main.py:160-167`): Added single-word/short-phrase confirmations to `_PRAISE_CONFIRMATION_RE`: "Exactly!", "Right!", "Yes!", "Absolutely!", "You're right/correct", "That's right/correct/it", "Spot on!", "Nailed it!", "Bingo!". Why: these short affirmations were slipping through the existing filter which only caught multi-word praise phrases.
+
+- **Added mid-sentence affirmation stripping** (`main.py:341-349`): New regex strips "Exactly.", "Precisely,", "You're correct" when embedded mid-sentence. Why: even after the start-of-response filter, single-word confirmations appeared mid-response (e.g., "Exactly, that's the right approach.").
+
+- **Expanded confirmation discipline in prompt** (`agents/tutor_agent.py:444-446`): Added explicit prohibition of "Exactly!", "Correct!", "Right!", "That's it!", "Spot on!", "Bingo!" and all single-word/short-phrase affirmations. Why: the LLM needed clearer instruction that ANY short affirmation confirms correctness.
+
+### Correctness (P1) — 27 failure turns
+
+- **Strengthened context drift prevention** (`agents/tutor_agent.py:394-398`): Added rules prohibiting introduction of new variables/functions not in the original problem (e.g., inventing g(x) when problem uses f(x)), and requiring examples/analogies to use different numbers from the same problem type. Why: lesson_01_derivatives showed the tutor introducing g(x) and h(x) functions, and lesson_02_recursion drifted from factorial to fibonacci.
+
+- **Improved student drift redirection** (`agents/tutor_agent.py:390-391`): Changed generic "redirect them back" to specific template: "Let's come back to [current problem]. We can explore that other topic after we finish this one." Why: the tutor acknowledged drift but didn't actively redirect.
+
+### Pedagogy (P2) — 39 failure turns + 59 helpfulness failures
+
+- **Added response advancement rule** (`agents/tutor_agent.py:433-436`): New rule requires every response to advance the student's understanding with something NEW — a new angle, a specific step to examine, or a concrete sub-problem. Prohibits repeating the same question in different words. Why: multiple sessions showed the tutor asking the same question 3+ times in different phrasing.
+
+- **Added specificity rule** (`agents/tutor_agent.py:437-439`): New rule requires specific references to the student's work instead of generic phrases. Example: "Look at the step where you multiplied — what rule did you apply there?" instead of "Check your work". Why: generic responses scored low on both pedagogy and helpfulness.
+
+- **Improved neutral openers** (`main.py:170-177`): Expanded from 5 to 8 openers, replaced vague "Let's focus on the key step in your work" with more engaging alternatives like "Interesting approach — let me ask you about one specific step" and "There's a key detail here worth revisiting". Why: the original openers were too generic and contributed to helpfulness failures.
+
+---
+
 ## [Unreleased] — 2026-03-12 (Run #4)
 
 Targeted improvements driven by run `run_20260312_192752` (12/17 scenarios).

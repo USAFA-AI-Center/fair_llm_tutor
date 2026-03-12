@@ -158,9 +158,12 @@ _PRAISE_VALUE_RE = re.compile(
 # confirms a correct answer without explicitly stating it.
 # E.g., "Excellent work! What was your reasoning..." or "Great job! Ready for..."
 _PRAISE_CONFIRMATION_RE = re.compile(
-    r"^(?:Excellent(?:\s+work)?|Great(?:\s+job)?|Well\s+done|Correct|"
-    r"Perfect|Brilliant|Wonderful|Superb|Bravo|Outstanding|Fantastic"
-    r"(?:\s+job)?|Nice\s+work|Good\s+work|Great\s+work|"
+    r"^(?:Exactly|Exactly\s+right|Excellent(?:\s+work)?|Great(?:\s+job)?|"
+    r"Well\s+done|Correct|Right|Yes|Absolutely|Perfect|Brilliant|Wonderful|"
+    r"Superb|Bravo|Outstanding|Fantastic(?:\s+job)?|Nice\s+work|Good\s+work|"
+    r"Great\s+work|You'?re\s+(?:right|correct|absolutely\s+right)|"
+    r"That'?s\s+(?:right|correct|exactly\s+right|it|exactly)|"
+    r"Spot\s+on|Nailed\s+it|Bingo|"
     r"Great\s+(?:observation|understanding|thinking|approach|reasoning|questions)"
     r")(?:\s*[!.])+\s*",
     re.IGNORECASE,
@@ -170,9 +173,12 @@ _PRAISE_CONFIRMATION_RE = re.compile(
 _NEUTRAL_OPENERS = [
     "Let's look at your approach more carefully. ",
     "I see what you're doing here. ",
-    "Let's focus on the key step in your work. ",
-    "You're making progress. ",
+    "You're making progress — let's dig into the details. ",
     "Let's build on what you have so far. ",
+    "Interesting approach — let me ask you about one specific step. ",
+    "I notice something worth examining in your work. ",
+    "Let's trace through your reasoning together. ",
+    "There's a key detail here worth revisiting. ",
 ]
 
 # Matches truncated responses ending with ":" and no content after
@@ -337,6 +343,17 @@ def sanitize_tutor_response(response: str | None) -> str:
     # This must run AFTER sentence-level filtering above.
     if _PRAISE_CONFIRMATION_RE.match(text):
         text = _PRAISE_CONFIRMATION_RE.sub(_get_praise_replacement(), text, count=1)
+
+    # Strip mid-sentence affirmations that confirm correctness
+    text = re.sub(
+        r"(?:^|\.\s+)(?:Exactly|Precisely|Absolutely|You'?re\s+(?:absolutely\s+)?correct)"
+        r"(?:\s*[!.,])?\s*",
+        lambda _: ". ",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+    if text.startswith(". "):
+        text = text[2:]
 
     # Catch truncated responses ending with ":" and no content
     if _TRUNCATED_RESPONSE_RE.search(text) and len(text) < 80:
