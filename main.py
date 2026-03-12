@@ -17,6 +17,7 @@ The system will:
 """
 
 import asyncio
+import itertools
 import json
 import logging
 import re
@@ -78,6 +79,7 @@ _TOOL_LINE_RE = re.compile(r"^\s*(?:\{|tool_)", re.IGNORECASE)
 _CONFIRMATION_VERBS = (
     r"found|determined|calculated|identified|got|solved|derived|computed|applied|shown"
     r"|rewrote|implemented|understood|recognized|demonstrated|verified|traced|wrote"
+    r"|recalculated|recalculating|completed|established|proved|proven|obtained|arrived"
 )
 
 # Matches phrases that implicitly confirm correctness by declaring student work
@@ -87,10 +89,11 @@ _IMPLICIT_CONFIRMATION_RE = re.compile(
     r"(?:your\s+(?:function|code|solution|implementation|program|answer|formula|equation)"
     r"\s+(?:should|will|does)\s+(?:work|run|execute|compute)\s+"
     r"(?:perfectly|correctly|fine|now|as expected))"
-    r"|(?:(?:here'?s|here\s+is)\s+your\s+(?:final|complete|finished|corrected|working)"
+    r"|(?:(?:here'?s|here\s+is)\s+your\s+(?:final|complete|completed|finished|corrected|working)"
     r"\s+(?:code|solution|implementation|function|program|answer|version))"
-    r"|(?:your\s+(?:final|complete|corrected|finished|working)"
-    r"\s+(?:code|solution|implementation|function|program|answer|version)\s+(?:is|looks|would\s+be))",
+    r"|(?:your\s+(?:final|complete|completed|corrected|finished|working)"
+    r"\s+(?:code|solution|implementation|function|program|answer|version)\s+(?:is|looks|would\s+be))"
+    r"|(?:your\s+(?:final|complete|completed)\s+(?:result|answer|value)\s+is\b)",
     re.IGNORECASE,
 )
 
@@ -113,16 +116,41 @@ _ANSWER_CONFIRMATION_RE = re.compile(
 # "as \( f'(x) = 6x + 2 \)", "giving us 12x^2 - 12x + 3"
 _DIRECT_ANSWER_RE = re.compile(
     r"(?:the\s+(?:answer|result|solution|value|derivative|integral)|"
+    r"your\s+(?:final\s+)?(?:answer|result|solution|value)\s+is|"
     r"(?:simplifies?|reduces?|equals?|evaluates?|gives?|giving)\s+(?:us\s+)?to|"
     r"is\s+indeed|"
+    r"is\s+approximately|"
     r"as\s+\\?\(?\s*[a-zA-Z]'?\s*\\?\(?\s*[a-zA-Z]\s*\\?\)?\s*=)"
     r"[^.!?\n]*(?:\d|=)[^.!?\n]*[.!?]?",
+    re.IGNORECASE,
+)
+
+# Matches complete step-by-step calculations that reveal intermediate + final values:
+# "3×6 + 4×8 = 18 + 32 = 50", "2*3 + 4 = 10", "f'(x) = 6x + 2"
+_COMPLETE_CALCULATION_RE = re.compile(
+    r"\d+\s*[×x*·]\s*\d+(?:\s*[+\-]\s*\d+\s*[×x*·]\s*\d+)*\s*=\s*[^.!?\n]*=\s*\d+",
     re.IGNORECASE,
 )
 
 # Matches LaTeX-style answers: \( f'(x) = ... \) or \( g'(x) = ... \)
 _LATEX_ANSWER_RE = re.compile(
     r"\\\(\s*[a-zA-Z]'?\s*\([a-zA-Z]\)\s*=\s*[^\\)]+\\\)",
+    re.IGNORECASE,
+)
+
+# Matches praise followed by embedded value confirmation:
+# "Great job on recalculating the top-right element correctly as 22!"
+# "Excellent work identifying the base case as n == 0!"
+_PRAISE_VALUE_RE = re.compile(
+    r"(?:Great job|Excellent|Well done|Correct|Perfect|Brilliant|Wonderful|"
+    r"Fantastic|Nice work|Good work|Outstanding|Superb|Bravo)"
+    r"(?:\s+(?:work|job))?\s+"
+    r"(?:on\s+)?"
+    r"(?:[^.!?\n](?!correctly|accurately|properly|right))*"
+    r"[^.!?\n]*"
+    r"(?:correctly|accurately|properly|right)\s+"
+    r"(?:as|to\s+be|that\s+it'?s?)\s+"
+    r"[^.!?\n]*[.!?]?",
     re.IGNORECASE,
 )
 
@@ -140,11 +168,11 @@ _PRAISE_CONFIRMATION_RE = re.compile(
 
 # Neutral openers to replace praise confirmations
 _NEUTRAL_OPENERS = [
-    "Let's take a closer look. ",
-    "Interesting approach. ",
-    "I see your thinking. ",
-    "Let's work through this together. ",
-    "Good effort so far. ",
+    "Let's look at your approach more carefully. ",
+    "I see what you're doing here. ",
+    "Let's focus on the key step in your work. ",
+    "You're making progress. ",
+    "Let's build on what you have so far. ",
 ]
 
 # Matches truncated responses ending with ":" and no content after
@@ -158,51 +186,38 @@ _GRACEFUL_FALLBACK = (
 # Varied replacements — each asks a DIFFERENT type of question to avoid
 # the "walk me through your steps" repetition loop.
 _CONFIRMATION_REPLACEMENTS = [
-    "What rule or concept did you apply here?",
-    "What would happen if the input were different — say, twice as large?",
-    "Can you think of a case where this approach might not work?",
-    "How does this connect to what we discussed earlier?",
-    "What's the key insight that makes this work?",
-    "Could you solve this a different way? What trade-offs would there be?",
-    "What part of this was trickiest for you, and why?",
+    "Let's check your reasoning step by step — what was the first operation you performed, and why?",
+    "Walk me through one specific step in your work. Which part are you most confident about?",
+    "Before we move on, can you explain why that particular step works mathematically?",
+    "That's an interesting approach. What would happen if you applied the same method to a slightly different input?",
+    "Let's verify your work together — can you re-derive your answer starting from the beginning?",
+    "Good progress. Can you identify the specific rule or theorem you used at the critical step?",
+    "I want to make sure you understand the underlying concept. What principle connects this step to the next?",
 ]
 _DIRECT_ANSWER_REPLACEMENTS = [
-    "Let's think about this differently. What concept applies here?",
-    "Before we continue, what's the key relationship in this problem?",
-    "Interesting — what would change if we modified the problem slightly?",
+    "Let's pause here. Can you explain why this step follows from the previous one?",
+    "Before we continue, try working through this step again and tell me what you notice.",
+    "Let me ask you this: what would the result look like if you changed one variable in the problem?",
 ]
 
-_confirmation_counter = 0
-_direct_answer_counter = 0
-_praise_counter = 0
+_confirmation_cycle = itertools.cycle(_CONFIRMATION_REPLACEMENTS)
+_direct_answer_cycle = itertools.cycle(_DIRECT_ANSWER_REPLACEMENTS)
+_praise_cycle = itertools.cycle(_NEUTRAL_OPENERS)
 
 
 def _get_confirmation_replacement() -> str:
     """Rotate through replacement phrases to avoid repetition."""
-    global _confirmation_counter
-    text = _CONFIRMATION_REPLACEMENTS[
-        _confirmation_counter % len(_CONFIRMATION_REPLACEMENTS)
-    ]
-    _confirmation_counter += 1
-    return text
+    return next(_confirmation_cycle)
 
 
 def _get_direct_answer_replacement() -> str:
     """Rotate through direct-answer replacement phrases."""
-    global _direct_answer_counter
-    text = _DIRECT_ANSWER_REPLACEMENTS[
-        _direct_answer_counter % len(_DIRECT_ANSWER_REPLACEMENTS)
-    ]
-    _direct_answer_counter += 1
-    return text
+    return next(_direct_answer_cycle)
 
 
 def _get_praise_replacement() -> str:
     """Rotate through neutral openers to replace implicit praise confirmations."""
-    global _praise_counter
-    text = _NEUTRAL_OPENERS[_praise_counter % len(_NEUTRAL_OPENERS)]
-    _praise_counter += 1
-    return text
+    return next(_praise_cycle)
 
 
 def _strip_sentences_with_answers(text: str) -> str:
@@ -242,6 +257,16 @@ def _strip_sentences_with_answers(text: str) -> str:
                     clean.append(_get_confirmation_replacement())
                     replaced = True
                 continue
+        if _PRAISE_VALUE_RE.search(sent):
+            if not replaced:
+                clean.append(_get_confirmation_replacement())
+                replaced = True
+            continue
+        if _COMPLETE_CALCULATION_RE.search(sent):
+            if not replaced:
+                clean.append(_get_confirmation_replacement())
+                replaced = True
+            continue
         clean.append(sent)
 
     return " ".join(clean).strip()
@@ -292,7 +317,9 @@ def sanitize_tutor_response(response: str | None) -> str:
     # perfectly". Sentence-level removal prevents leftover answer fragments.
     if (_ANSWER_CONFIRMATION_RE.search(text) or _DIRECT_ANSWER_RE.search(text)
             or _LATEX_ANSWER_RE.search(text)
-            or _IMPLICIT_CONFIRMATION_RE.search(text)):
+            or _IMPLICIT_CONFIRMATION_RE.search(text)
+            or _PRAISE_VALUE_RE.search(text)
+            or _COMPLETE_CALCULATION_RE.search(text)):
         text = _strip_sentences_with_answers(text)
 
     # Strip complete code solutions — the tutor sometimes dumps full code blocks

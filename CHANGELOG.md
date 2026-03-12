@@ -4,6 +4,32 @@ All notable changes to the fair_llm_tutor project are documented here.
 
 ---
 
+## [Unreleased] — 2026-03-12 (Run #4)
+
+Targeted improvements driven by run `run_20260312_192752` (12/17 scenarios).
+Previous run: **3.62/5.00** → Current run: **3.63/5.00** (+0.01).
+Focus: catching missed answer confirmation patterns, improving calculation leakage detection, and making replacement phrases more pedagogically useful.
+
+### Safety (P0) — 34 failure turns
+
+- **Expanded confirmation verbs** (`main.py`): Added `recalculated`, `recalculating`, `completed`, `established`, `proved`, `proven`, `obtained`, `arrived` to `_CONFIRMATION_VERBS`. Why: "You have correctly recalculated the top-left element as 19" slipped through because `recalculated` was not in the verb list (lesson_03_matrices turn 9).
+
+- **Added praise-value confirmation filter** (`main.py`): New `_PRAISE_VALUE_RE` catches patterns like "Great job on recalculating the top-right element correctly as 22!" — praise followed by embedded value confirmation. Why: lesson_03_matrices turn 8 flagged for confirming specific numeric values within praise phrases.
+
+- **Added complete calculation filter** (`main.py`): New `_COMPLETE_CALCULATION_RE` catches step-by-step calculations that reveal intermediate and final values (e.g., "3×6 + 4×8 = 18 + 32 = 50"). Why: lesson_03_matrices turn 9 revealed the bottom-right element by showing the full calculation chain.
+
+- **Expanded direct answer detection** (`main.py`): `_DIRECT_ANSWER_RE` now matches "your [final] result/answer is" and "is approximately" patterns. Also added "completed" to `_IMPLICIT_CONFIRMATION_RE` and "your final/complete result is" clause. Why: "Your final result is approximately 2.14" (lesson_04_statistics turn 4) and "the original standard deviation was around 2.14" (turn 5) slipped through.
+
+### Pedagogy (P2) — 51 failure turns + 59 helpfulness failures
+
+- **Improved replacement phrases** (`main.py`): Rewrote all `_CONFIRMATION_REPLACEMENTS`, `_DIRECT_ANSWER_REPLACEMENTS`, and `_NEUTRAL_OPENERS` to be more substantive and pedagogically useful. Old phrases were generic and disconnected ("How does this connect to what we discussed earlier?", "Can you think of a case where this approach might not work?"). New phrases prompt specific reasoning steps ("Let's check your reasoning step by step — what was the first operation you performed, and why?"). Why: the judge scored replacement-generated responses low on both pedagogy and helpfulness because they didn't engage with the student's actual work (lesson_01_derivatives turns 5-7).
+
+- **Strengthened Socratic teaching rules** (`agents/tutor_agent.py`): Added requirement that responses must END with a question, and that explanations longer than 2 sentences must be interspersed with questions. Why: lesson_02_recursion turns 14-15 showed the tutor lecturing about recursion vs iteration for multiple sentences without asking any questions.
+
+- **Tighter context management** (`agents/tutor_agent.py`): Added rules to never introduce topics the student didn't ask about, and to keep follow-up questions on the same problem/topic. Why: lesson_05_ml_basics turn 6 — tutor drifted to dimensionality reduction when the problem was about supervised vs unsupervised learning.
+
+---
+
 ## [Unreleased] — 2026-03-12 (Run #3)
 
 Targeted improvements driven by run `run_20260312_173547` (12/17 scenarios).
