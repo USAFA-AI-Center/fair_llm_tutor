@@ -80,6 +80,20 @@ _CONFIRMATION_VERBS = (
     r"|rewrote|implemented|understood|recognized|demonstrated|verified|traced|wrote"
 )
 
+# Matches phrases that implicitly confirm correctness by declaring student work
+# is complete/perfect/final, e.g. "your function should work perfectly",
+# "Here's your final code:", "Your final implementation:"
+_IMPLICIT_CONFIRMATION_RE = re.compile(
+    r"(?:your\s+(?:function|code|solution|implementation|program|answer|formula|equation)"
+    r"\s+(?:should|will|does)\s+(?:work|run|execute|compute)\s+"
+    r"(?:perfectly|correctly|fine|now|as expected))"
+    r"|(?:(?:here'?s|here\s+is)\s+your\s+(?:final|complete|finished|corrected|working)"
+    r"\s+(?:code|solution|implementation|function|program|answer|version))"
+    r"|(?:your\s+(?:final|complete|corrected|finished|working)"
+    r"\s+(?:code|solution|implementation|function|program|answer|version)\s+(?:is|looks|would\s+be))",
+    re.IGNORECASE,
+)
+
 # Matches the FULL sentence containing an answer confirmation.
 # Captures from an optional leading praise word through to the next sentence
 # boundary (period, exclamation, or question mark followed by space/end).
@@ -141,48 +155,53 @@ _GRACEFUL_FALLBACK = (
     "Could you try rephrasing your question or showing me your work step by step?"
 )
 
-# Varied replacements to avoid repetitive "Interesting approach!" on every turn
+# Varied replacements — each asks a DIFFERENT type of question to avoid
+# the "walk me through your steps" repetition loop.
 _CONFIRMATION_REPLACEMENTS = [
-    "Can you walk me through the steps you used to get there?",
-    "What was your reasoning for each step?",
-    "How did you arrive at that? Walk me through your thinking.",
-    "Can you explain your approach step by step?",
-    "What method did you use? Show me your work.",
+    "What rule or concept did you apply here?",
+    "What would happen if the input were different — say, twice as large?",
+    "Can you think of a case where this approach might not work?",
+    "How does this connect to what we discussed earlier?",
+    "What's the key insight that makes this work?",
+    "Could you solve this a different way? What trade-offs would there be?",
+    "What part of this was trickiest for you, and why?",
 ]
 _DIRECT_ANSWER_REPLACEMENTS = [
-    "Let's check your reasoning. Can you walk me through your steps?",
-    "Before we continue, can you verify each step of your work?",
-    "Let's make sure you understand the process. What did you do first?",
+    "Let's think about this differently. What concept applies here?",
+    "Before we continue, what's the key relationship in this problem?",
+    "Interesting — what would change if we modified the problem slightly?",
 ]
 
-_replacement_counter = 0
+_confirmation_counter = 0
+_direct_answer_counter = 0
+_praise_counter = 0
 
 
 def _get_confirmation_replacement() -> str:
     """Rotate through replacement phrases to avoid repetition."""
-    global _replacement_counter
+    global _confirmation_counter
     text = _CONFIRMATION_REPLACEMENTS[
-        _replacement_counter % len(_CONFIRMATION_REPLACEMENTS)
+        _confirmation_counter % len(_CONFIRMATION_REPLACEMENTS)
     ]
-    _replacement_counter += 1
+    _confirmation_counter += 1
     return text
 
 
 def _get_direct_answer_replacement() -> str:
     """Rotate through direct-answer replacement phrases."""
-    global _replacement_counter
+    global _direct_answer_counter
     text = _DIRECT_ANSWER_REPLACEMENTS[
-        _replacement_counter % len(_DIRECT_ANSWER_REPLACEMENTS)
+        _direct_answer_counter % len(_DIRECT_ANSWER_REPLACEMENTS)
     ]
-    _replacement_counter += 1
+    _direct_answer_counter += 1
     return text
 
 
 def _get_praise_replacement() -> str:
     """Rotate through neutral openers to replace implicit praise confirmations."""
-    global _replacement_counter
-    text = _NEUTRAL_OPENERS[_replacement_counter % len(_NEUTRAL_OPENERS)]
-    _replacement_counter += 1
+    global _praise_counter
+    text = _NEUTRAL_OPENERS[_praise_counter % len(_NEUTRAL_OPENERS)]
+    _praise_counter += 1
     return text
 
 
@@ -202,16 +221,19 @@ def _strip_sentences_with_answers(text: str) -> str:
             if not replaced:
                 clean.append(_get_confirmation_replacement())
                 replaced = True
-            # Skip this sentence entirely — it contains the answer
             continue
         if _DIRECT_ANSWER_RE.search(sent):
             if not replaced:
                 clean.append(_get_direct_answer_replacement())
                 replaced = True
             continue
+        if _IMPLICIT_CONFIRMATION_RE.search(sent):
+            # "your function should work perfectly", "Here's your final code", etc.
+            if not replaced:
+                clean.append(_get_confirmation_replacement())
+                replaced = True
+            continue
         if _LATEX_ANSWER_RE.search(sent):
-            # Check if this sentence is affirming an answer
-            # (e.g., "You correctly rewrote ... as \( x^{-2} \) and applied...")
             affirm_words = re.search(
                 r'\b(?:correctly|right|exactly|yes|correct)\b', sent, re.IGNORECASE
             )
@@ -265,12 +287,23 @@ def sanitize_tutor_response(response: str | None) -> str:
     if not text or len(text) < 10:
         return _GRACEFUL_FALLBACK
 
-    # Defence-in-depth: strip full sentences containing answer confirmations
-    # or direct answer statements. Sentence-level removal prevents leftover
-    # answer fragments that word-level regex sub would leave.
+    # Defence-in-depth: strip full sentences containing answer confirmations,
+    # direct answer statements, or implicit confirmations like "your code works
+    # perfectly". Sentence-level removal prevents leftover answer fragments.
     if (_ANSWER_CONFIRMATION_RE.search(text) or _DIRECT_ANSWER_RE.search(text)
-            or _LATEX_ANSWER_RE.search(text)):
+            or _LATEX_ANSWER_RE.search(text)
+            or _IMPLICIT_CONFIRMATION_RE.search(text)):
         text = _strip_sentences_with_answers(text)
+
+    # Strip complete code solutions — the tutor sometimes dumps full code blocks
+    # that reveal the answer. Remove code blocks that follow confirmatory phrasing.
+    if re.search(r"(?:Here'?s|here\s+is)[^:]*:\s*```", text, re.IGNORECASE):
+        text = re.sub(
+            r"(?:Here'?s|here\s+is)[^:]*:\s*```[\s\S]*?```",
+            lambda _: _get_confirmation_replacement(),
+            text,
+            flags=re.IGNORECASE,
+        )
 
     # Strip standalone praise at start of response that implicitly confirms
     # correctness (e.g., "Excellent work! Walk me through...").

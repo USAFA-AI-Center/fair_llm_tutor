@@ -4,7 +4,31 @@ All notable changes to the fair_llm_tutor project are documented here.
 
 ---
 
-## [Unreleased] — 2026-03-12
+## [Unreleased] — 2026-03-12 (Run #3)
+
+Targeted improvements driven by run `run_20260312_173547` (12/17 scenarios).
+Previous run: **3.51/5.00** → Current run: **3.62/5.00** (+0.11).
+Focus: breaking the repetitive "walk me through your steps" loop, catching implicit answer confirmations, and preventing code solution leaks.
+
+### Safety (P0) — 35 failure turns
+
+- **Added implicit confirmation filter** (`main.py`): New `_IMPLICIT_CONFIRMATION_RE` catches phrases like "your function should work perfectly", "Here's your final code:", "Your final implementation is:" that confirm correctness without explicitly stating the answer. Why: 35 turns scored safety <= 2; the judge flagged "your function should work perfectly" and "Here's your final code:" as implicit answer revelations (lesson_02_recursion turns 4, 6, 9, 10).
+
+- **Added code block solution stripping** (`main.py`): New regex in `sanitize_tutor_response()` strips complete code blocks that follow confirmatory phrasing (e.g., "Here's your code: ```python...```"). Why: the tutor was dumping full working implementations as "final code" which reveals the answer.
+
+### Pedagogy (P2) — 63 failure turns + 72 helpfulness failures
+
+- **Diversified replacement phrases** (`main.py`): Replaced all 5 `_CONFIRMATION_REPLACEMENTS` (previously all variants of "walk me through your steps") with 7 genuinely different question types: "What rule did you apply?", "What if the input were different?", "Can you think of a case where this wouldn't work?", etc. Also diversified `_DIRECT_ANSWER_REPLACEMENTS`. Why: the post-processor was creating an inescapable repetition loop — it stripped praise/confirmations and replaced them with "walk me through your steps", which the LLM then echoed back, causing 63 pedagogy and 72 helpfulness failures.
+
+- **Stronger anti-repetition rules** (`agents/tutor_agent.py`): Replaced general anti-repetition guidance with an explicit BANNED PHRASES list ("walk me through", "explain your reasoning", "show me your work", "what method did you use"). Added instruction to never provide complete code solutions. Why: lesson_01_derivatives had 14 failure turns where the tutor repeated "walk me through your steps" on turns 4-17 despite the student's increasing frustration.
+
+- **Improved frustration handling** (`agents/tutor_agent.py`): Rewrote the frustration handling rule to be more direct: if the student expresses frustration, YOU are the problem. Must immediately give a concrete, specific hint about content — not another meta-question about process. Why: lesson_01_derivatives turns 9-17 show escalating student frustration with the tutor repeatedly asking the same question.
+
+- **Strengthened context management** (`agents/tutor_agent.py`): Added instruction to reference the current problem BY NAME in every response, and to READ the PROBLEM field from input carefully. Why: lesson_02_recursion turn 13 — tutor responded about sum of squares when the problem was factorial.
+
+---
+
+## [Unreleased] — 2026-03-12 (Run #2)
 
 Targeted improvements driven by run `run_20260312_153752` (13/17 scenarios).
 Baseline score: **3.35/5.00** → Previous run: **3.51/5.00** (+0.16).
