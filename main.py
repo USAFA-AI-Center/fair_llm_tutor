@@ -23,6 +23,7 @@ import logging
 import re
 import sys
 import argparse
+import threading
 from pathlib import Path
 from typing import List, Optional
 
@@ -159,12 +160,12 @@ _PRAISE_VALUE_RE = re.compile(
 # E.g., "Excellent work! What was your reasoning..." or "Great job! Ready for..."
 _PRAISE_CONFIRMATION_RE = re.compile(
     r"^(?:Exactly|Exactly\s+right|Excellent(?:\s+work)?|Great(?:\s+job)?|"
-    r"Well\s+done|Correct|Right|Yes|Absolutely|Perfect|Brilliant|Wonderful|"
-    r"Superb|Bravo|Outstanding|Fantastic(?:\s+job)?|Nice\s+work|Good\s+work|"
-    r"Great\s+work|You'?re\s+(?:right|correct|absolutely\s+right)|"
+    r"Well\s+done|Correct|Right(?=\s*[!.])|Yes|Absolutely|Perfect|Brilliant|"
+    r"Wonderful|Superb|Bravo|Outstanding|Fantastic(?:\s+job)?|Nice\s+work|"
+    r"Good\s+work|Great\s+work|You'?re\s+(?:right|correct|absolutely\s+right)|"
     r"That'?s\s+(?:right|correct|exactly\s+right|it|exactly)|"
     r"Spot\s+on|Nailed\s+it|Bingo|"
-    r"Great\s+(?:observation|understanding|thinking|approach|reasoning|questions)"
+    r"Great\s+(?:observations?|understanding|thinking|approach|reasoning|questions?)"
     r")(?:\s*[!.])+\s*",
     re.IGNORECASE,
 )
@@ -209,21 +210,25 @@ _DIRECT_ANSWER_REPLACEMENTS = [
 _confirmation_cycle = itertools.cycle(_CONFIRMATION_REPLACEMENTS)
 _direct_answer_cycle = itertools.cycle(_DIRECT_ANSWER_REPLACEMENTS)
 _praise_cycle = itertools.cycle(_NEUTRAL_OPENERS)
+_cycle_lock = threading.Lock()
 
 
 def _get_confirmation_replacement() -> str:
     """Rotate through replacement phrases to avoid repetition."""
-    return next(_confirmation_cycle)
+    with _cycle_lock:
+        return next(_confirmation_cycle)
 
 
 def _get_direct_answer_replacement() -> str:
     """Rotate through direct-answer replacement phrases."""
-    return next(_direct_answer_cycle)
+    with _cycle_lock:
+        return next(_direct_answer_cycle)
 
 
 def _get_praise_replacement() -> str:
     """Rotate through neutral openers to replace implicit praise confirmations."""
-    return next(_praise_cycle)
+    with _cycle_lock:
+        return next(_praise_cycle)
 
 
 def _strip_sentences_with_answers(text: str) -> str:
@@ -344,10 +349,12 @@ def sanitize_tutor_response(response: str | None) -> str:
     if _PRAISE_CONFIRMATION_RE.match(text):
         text = _PRAISE_CONFIRMATION_RE.sub(_get_praise_replacement(), text, count=1)
 
-    # Strip mid-sentence affirmations that confirm correctness
+    # Strip mid-sentence affirmations that confirm correctness.
+    # Require trailing punctuation [!.,] to avoid false positives on
+    # adverbial uses like "Absolutely crucial is the chain rule here."
     text = re.sub(
         r"(?:^|\.\s+)(?:Exactly|Precisely|Absolutely|You'?re\s+(?:absolutely\s+)?correct)"
-        r"(?:\s*[!.,])?\s*",
+        r"(?:\s*[!.,])\s*",
         lambda _: ". ",
         text,
         flags=re.IGNORECASE,
