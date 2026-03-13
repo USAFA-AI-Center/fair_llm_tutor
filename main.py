@@ -125,6 +125,11 @@ _LATEX_ANSWER_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Pre-compiled pattern for affirmation words used in LaTeX answer checking
+_AFFIRM_WORDS_RE = re.compile(
+    r'\b(?:correctly|right|exactly|yes|correct)\b', re.IGNORECASE
+)
+
 # Matches praise followed by embedded value confirmation:
 # "Great job on recalculating the top-right element correctly as 22!"
 # "Excellent work identifying the base case as n == 0!"
@@ -186,6 +191,16 @@ _GRACEFUL_FALLBACK = (
     "Could you try rephrasing your question or showing me your work step by step?"
 )
 
+# Matches internal-reasoning sentences that leaked into student-facing output:
+# "All parts of the original request have been fully addressed."
+# "The original request has been fully addressed."
+# "The student's confusion about X has been addressed."
+_INTERNAL_REASONING_RE = re.compile(
+    r"(?:All parts of |The )?"
+    r"(?:the\s+)?(?:original\s+)?request\s+(?:has|have)\s+been\s+fully\s+addressed",
+    re.IGNORECASE,
+)
+
 # Extracts numeric values and simple expressions for context-aware sanitization.
 # Used to determine whether the tutor is "revealing" a value the student already stated.
 _NUMERIC_VALUE_RE = re.compile(r'-?\d+(?:\.\d+)?')
@@ -198,7 +213,7 @@ _THIRD_PERSON_SENTENCE_RE = re.compile(
     r"demonstrated|showed|identified|recalled|explained|understood|applied|noted|mentioned|"
     r"recognized|grasped|calculated|computed|derived|obtained|arrived|wrote|provided|"
     r"submitted|presented|stated|described|observed|pointed|used|chose|selected|made|"
-    r"work\b)",
+    r"confusion|question|response|answer|work\b)",
     re.IGNORECASE,
 )
 
@@ -222,9 +237,9 @@ _CONFIRMATION_REPLACEMENTS = (
     "Can you identify the most important step in your work and explain why it's correct?",
     "What assumptions are you making here? Are there edge cases where your approach might not work?",
     "Try explaining your solution as if teaching it to a classmate — what's the core idea?",
-    "What's the relationship between the given information and your result? How does each piece connect?",
-    "Before we move on, what's the trickiest part of this problem, and how did you handle it?",
-    "Can you trace through your work with a specific example to verify each step?",
+    "Now apply the same method to a harder variant. What additional considerations would you need?",
+    "Let's test your understanding — can you predict what would happen if we changed one variable?",
+    "Walk me through the most challenging step — what made it tricky and how did you handle it?",
 )
 _DIRECT_ANSWER_REPLACEMENTS = (
     "What rule or formula connects the information you were given to the result you need?",
@@ -315,27 +330,37 @@ def _strip_sentences_with_answers(
                 replaced = True
             continue
 
-        # Check answer-confirming patterns, but only strip if revealing NEW values
-        is_confirming = False
+        # Check answer-confirming patterns.
+        # Some patterns are ALWAYS stripped (they confirm correctness by definition).
+        # Others are context-aware (only stripped when introducing new values).
+        always_strip = False
+        context_strip = False
         replacement_fn = _get_confirmation_replacement
 
         if _ANSWER_CONFIRMATION_RE.search(sent):
-            is_confirming = True
+            # "You correctly found/calculated/applied X" — always a confirmation
+            always_strip = True
+        elif _PRAISE_VALUE_RE.search(sent):
+            # "Great job on finding X correctly as Y!" — always a confirmation
+            always_strip = True
         elif _DIRECT_ANSWER_RE.search(sent):
-            is_confirming = True
+            context_strip = True
             replacement_fn = _get_direct_answer_replacement
         elif _LATEX_ANSWER_RE.search(sent):
-            affirm_words = re.search(
-                r'\b(?:correctly|right|exactly|yes|correct)\b', sent, re.IGNORECASE
-            )
-            if affirm_words:
-                is_confirming = True
-        elif _PRAISE_VALUE_RE.search(sent):
-            is_confirming = True
+            if _AFFIRM_WORDS_RE.search(sent):
+                always_strip = True
+            else:
+                context_strip = True
         elif _COMPLETE_CALCULATION_RE.search(sent):
-            is_confirming = True
+            context_strip = True
 
-        if is_confirming:
+        if always_strip:
+            if not replaced:
+                clean.append(replacement_fn())
+                replaced = True
+            continue
+
+        if context_strip:
             # Context-aware: keep if student already stated these values
             if not _sentence_reveals_new_values(sent, student_values):
                 clean.append(sent)
@@ -367,7 +392,6 @@ def sanitize_tutor_response(response: str | None, student_work: str = "") -> str
         return _GRACEFUL_FALLBACK
 
     # Replace framework max-steps message with a graceful fallback
-    # Use search instead of match to catch it embedded in longer responses
     if _FRAMEWORK_FALLBACK_RE.search(response.strip()):
         return _GRACEFUL_FALLBACK
 
@@ -392,6 +416,13 @@ def sanitize_tutor_response(response: str | None, student_work: str = "") -> str
     elif _FINAL_ANSWER_PREFIX_RE.match(text):
         # Strip "Final Answer:" prefix (benign but unprofessional)
         text = _FINAL_ANSWER_PREFIX_RE.sub("", text, count=1).strip()
+
+    if not text or len(text) < 10:
+        return _GRACEFUL_FALLBACK
+
+    # Strip leaked internal reasoning ("the original request has been fully addressed")
+    if _INTERNAL_REASONING_RE.search(text):
+        text = _INTERNAL_REASONING_RE.sub("", text).strip()
 
     if not text or len(text) < 10:
         return _GRACEFUL_FALLBACK
@@ -431,17 +462,12 @@ def sanitize_tutor_response(response: str | None, student_work: str = "") -> str
             text,
         )
 
-    # Strip standalone praise at start of response ONLY when we have no
-    # evidence the student stated correct values.  If the student's work
-    # contains numeric values that appear in the tutor's response, the
-    # praise is likely warranted acknowledgment — keep it.
+    # Strip standalone praise at start of response — praise openers like
+    # "Great job!", "Excellent!", "Correct!" implicitly confirm the student's
+    # answer is right, which is a safety violation. Always replace with a
+    # neutral opener regardless of context.
     if _PRAISE_CONFIRMATION_RE.match(text):
-        student_values = _extract_student_values(student_work)
-        tutor_values = set(_NUMERIC_VALUE_RE.findall(text))
-        # If no student context or the tutor isn't referencing student values,
-        # strip the praise opener
-        if not student_values or not (tutor_values & student_values):
-            text = _PRAISE_CONFIRMATION_RE.sub(_get_praise_replacement(), text, count=1)
+        text = _PRAISE_CONFIRMATION_RE.sub(_get_praise_replacement(), text, count=1)
 
     # Catch truncated responses ending with ":" and no content
     if _TRUNCATED_RESPONSE_RE.search(text) and len(text) < 80:

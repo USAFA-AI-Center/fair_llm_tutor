@@ -216,14 +216,15 @@ class TestSanitizeTutorResponse:
 
     # --- Context-aware sanitization tests ---
 
-    def test_confirmation_preserved_when_student_stated_value(self):
-        """When the student already said '6x + 2', confirming it is NOT a revelation."""
+    def test_confirmation_stripped_even_when_student_stated_value(self):
+        """Answer confirmations are always stripped — confirming correctness is a safety violation."""
         resp = (
             "Excellent work! You correctly derived the derivative as 6x + 2. "
             "Now try a harder function like g(x) = 4x^3 - 2x^2 + 3x - 7."
         )
         result = sanitize_tutor_response(resp, student_work="I got 6x + 2")
-        assert "6x + 2" in result
+        # The confirmation sentence is stripped, but the follow-up is kept
+        assert "You correctly derived" not in result
         assert "harder function" in result
 
     def test_confirmation_stripped_when_student_did_not_state_value(self):

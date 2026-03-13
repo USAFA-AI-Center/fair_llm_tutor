@@ -4,6 +4,34 @@ All notable changes to the fair_llm_tutor project are documented here.
 
 ---
 
+## [Unreleased] — 2026-03-13 (Run #8)
+
+Targeted improvements driven by run `run_20260313_195712` (12/17 scenarios, 5 timed out).
+Previous run: **3.72/5.00** → Current run: **3.84/5.00** (+0.12).
+Failure turns: **97 → 66** (-31). Focus: fixing context-aware sanitizer bypass for answer confirmations, catching internal reasoning leaks, improving replacement phrase quality.
+
+### Safety (P0) — 24 failure turns (down from 30)
+
+- **Fixed context-aware bypass for answer confirmations** (`main.py:335-372`): `_ANSWER_CONFIRMATION_RE` and `_PRAISE_VALUE_RE` matches are now ALWAYS stripped, regardless of whether the student previously stated the same values. Previously, when the student said "6x + 2" and the tutor confirmed "You correctly found 6x + 2", the sanitizer saw matching values and kept the confirmation. But confirming correctness IS the safety violation, even if values overlap. Only `_DIRECT_ANSWER_RE`, `_LATEX_ANSWER_RE`, and `_COMPLETE_CALCULATION_RE` retain context-aware filtering (for diagnostic references). Why: lesson_01_derivatives turns 4, 17 — judge scored safety=1 for confirmations the sanitizer should have caught.
+
+- **Praise openers always stripped** (`main.py:463-464`): Removed the context-aware exception for `_PRAISE_CONFIRMATION_RE`. Praise openers ("Great job!", "Excellent!") always implicitly confirm correctness. Why: the previous check only stripped praise when tutor values didn't overlap with student values, allowing many confirmations through.
+
+- **Added internal reasoning leak filter** (`main.py:193-197, 422-425`): New `_INTERNAL_REASONING_RE` catches leaked framework phrases like "All parts of the original request have been fully addressed" and "The student's confusion has been addressed." Why: lesson_02_recursion turn 9 and lesson_10_chemistry turn 16 showed these leaking to students.
+
+- **Expanded third-person detection** (`main.py:208`): Added "confusion", "question", "response", "answer" to `_THIRD_PERSON_SENTENCE_RE`. Why: lesson_10_chemistry turn 16 — "The student's confusion about the oxygen atom count has been addressed" was not caught.
+
+### Helpfulness (P2) — 48 failure turns
+
+- **Improved replacement phrases** (`main.py:232-240`): Replaced three generic meta-questions with advancing-oriented alternatives: "Now apply the same method to a harder variant", "Let's test your understanding — can you predict what would happen if we changed one variable?", "Walk me through the most challenging step." Why: the previous replacements ("What's the relationship between...", "Before we move on...", "Can you trace through...") scored poorly on helpfulness because they didn't advance learning.
+
+### Quality
+
+- **Extracted inline regex to module constant** (`main.py:128-130`): Moved affirmation-word regex from inline `re.search()` call inside sentence loop to pre-compiled `_AFFIRM_WORDS_RE` at module level. Why: code quality review flagged per-sentence regex compilation as inefficient.
+
+- **Reordered internal reasoning check** (`main.py:422-425`): Moved `_INTERNAL_REASONING_RE` check after framework leak extraction instead of before, so it runs on cleaned text. Why: efficiency review flagged premature checking on raw response.
+
+---
+
 ## [Unreleased] — 2026-03-13 (Run #7)
 
 Targeted improvements driven by run `run_20260313_173441` (13/17 scenarios).
