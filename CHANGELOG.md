@@ -4,6 +4,42 @@ All notable changes to the fair_llm_tutor project are documented here.
 
 ---
 
+## [Unreleased] — 2026-03-13 (Run #6)
+
+Targeted improvements driven by run `run_20260313_153916` (13/17 scenarios).
+Previous run: **3.82/5.00** → Current run: **3.69/5.00** (-0.13, regressed).
+Focus: catching more answer confirmation patterns, improving response specificity, and preventing context drift.
+
+### Safety (P0) — 24 failure turns
+
+- **Expanded confirmation verbs** (`main.py:80-84`): Added `handled|handles|handling|covered|covers|managed|manages|addressed|mastered|nailed|built|constructed|produced|created|written|figured` to `_CONFIRMATION_VERBS`. Why: "Your iterative approach handles the base case correctly" (lesson_02_recursion turn 10) was not caught because "handles" wasn't in the verb list.
+
+- **Added mastery confirmation filter** (`main.py:173-183`): New `_MASTERY_CONFIRMATION_RE` catches patterns like "You've shown a strong grasp of the concept" and "Your function now correctly calculates..." that implicitly confirm the student's answer is complete/correct. Why: "You've successfully written an iterative factorial function" (lesson_02_recursion turn 15) leaked through existing filters.
+
+- **Expanded implicit confirmation scope** (`main.py:93-94`): `_IMPLICIT_CONFIRMATION_RE` now matches "here's the final result" and "here is the final result" (with optional "your"/"the"). Why: the tutor sometimes used "the" instead of "your" in completeness statements.
+
+- **Strengthened code block stripping** (`main.py:340-352`): Broadened the code-reveal detection regex to catch "your final function:", "the function:", and "your complete code:" patterns preceding code blocks. Why: "Here's your final function:" (lesson_02_recursion turn 10) was triggering code dumps.
+
+- **Added explicit prohibition in prompt** (`agents/tutor_agent.py:458-459`): Added "NEVER say 'Your [approach/function/code] handles [X] correctly' or 'You've successfully written [X]'" to CONFIRMATION DISCIPLINE. Why: the LLM needed explicit examples of these patterns to avoid them.
+
+### Correctness (P1) — 30 failure turns
+
+- **Strengthened arithmetic verification** (`agents/tutor_agent.py:362-366`): Added explicit instruction to compare student's intermediate values against own computation, with a concrete example. Why: lesson_03_matrices turns 16-17 — the tutor accepted wrong matrix multiplication values without checking (student said [1,3] dot [4,5] = 19 but matrix entries were different).
+
+- **Changed post-correct behavior** (`agents/tutor_agent.py:369-370`): Changed "celebrate briefly then challenge" to "DO NOT celebrate yet — ask them to explain WHY their approach works. Only confirm after they explain their reasoning." Why: premature celebration both confirms the answer (safety violation) and skips the pedagogical opportunity.
+
+- **Added sub-topic redirect rule** (`agents/tutor_agent.py:397-399`): When student mentions a sub-topic (e.g., PCA while discussing supervised vs unsupervised), tutor must connect it BACK to the current problem. Why: lesson_05_ml_basics turn 9 — tutor diverged into PCA when the active problem was about supervised vs unsupervised learning.
+
+### Pedagogy (P2) — 51 failure turns + 71 helpfulness failures
+
+- **Added concrete reference rules** (`agents/tutor_agent.py:444-452`): Three new Socratic rules requiring the tutor to (1) QUOTE the student's actual work when asking questions, (2) make questions ANSWERABLE with specific operations to perform, (3) point to the SPECIFIC step that needs attention instead of generic "try again". Why: the judge consistently scored generic questions low on helpfulness (lesson_01_derivatives turns 3-5, 13-14 all scored helpfulness=2).
+
+- **Improved neutral openers** (`main.py:186-193`): Replaced vague openers like "Let's look at your approach more carefully" with more directed ones like "I'd like to ask about a particular step in your reasoning" and "Let's check whether each step follows logically." Why: the old openers were too generic and contributed to helpfulness regression (-0.22 vs baseline).
+
+- **Improved confirmation replacements** (`main.py:207-225`): Expanded from 7 to 9 varied replacements with more specific, actionable prompts. Added "What assumptions are you making?", "Try explaining your solution as if teaching it to a classmate", "Can you trace through your work with a specific example?" Also expanded direct-answer replacements from 3 to 4. Why: replacement phrases need to engage with the student's actual problem, not just ask meta-questions about process.
+
+---
+
 ## [Unreleased] — 2026-03-12 (Run #5)
 
 Targeted improvements driven by run `run_20260312_215753` (12/17 scenarios).

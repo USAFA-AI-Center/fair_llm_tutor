@@ -16,13 +16,13 @@ The system will:
 - Start interactive tutoring session
 """
 
+import argparse
 import asyncio
 import itertools
 import json
 import logging
 import re
 import sys
-import argparse
 import threading
 from pathlib import Path
 from typing import List, Optional
@@ -36,7 +36,6 @@ except ImportError:
 from fairlib import (
     Document,
     HuggingFaceAdapter,
-    WorkingMemory,
     SummarizingMemory,
     ChromaDBVectorStore,
     SentenceTransformerEmbedder,
@@ -81,6 +80,8 @@ _CONFIRMATION_VERBS = (
     r"found|determined|calculated|identified|got|solved|derived|computed|applied|shown"
     r"|rewrote|implemented|understood|recognized|demonstrated|verified|traced|wrote"
     r"|recalculated|recalculating|completed|established|proved|proven|obtained|arrived"
+    r"|handled|handles|handling|covered|covers|managed|manages|addressed|mastered"
+    r"|nailed|built|constructed|produced|created|written|figured"
 )
 
 # Matches phrases that implicitly confirm correctness by declaring student work
@@ -90,8 +91,8 @@ _IMPLICIT_CONFIRMATION_RE = re.compile(
     r"(?:your\s+(?:function|code|solution|implementation|program|answer|formula|equation)"
     r"\s+(?:should|will|does)\s+(?:work|run|execute|compute)\s+"
     r"(?:perfectly|correctly|fine|now|as expected))"
-    r"|(?:(?:here'?s|here\s+is)\s+your\s+(?:final|complete|completed|finished|corrected|working)"
-    r"\s+(?:code|solution|implementation|function|program|answer|version))"
+    r"|(?:(?:here'?s|here\s+is)\s+(?:your\s+)?(?:the\s+)?(?:final|complete|completed|finished|corrected|working)"
+    r"\s+(?:code|solution|implementation|function|program|answer|version|result))"
     r"|(?:your\s+(?:final|complete|completed|corrected|finished|working)"
     r"\s+(?:code|solution|implementation|function|program|answer|version)\s+(?:is|looks|would\s+be))"
     r"|(?:your\s+(?:final|complete|completed)\s+(?:result|answer|value)\s+is\b)",
@@ -155,6 +156,18 @@ _PRAISE_VALUE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Matches praise + confirmation of completion/mastery that implicitly reveals
+# the student has the right answer, e.g. "You've shown a strong grasp of the concept"
+# or "Your function now correctly calculates..."
+_MASTERY_CONFIRMATION_RE = re.compile(
+    r"(?:you(?:'ve| have)?\s+(?:shown|demonstrated|proven|displayed)\s+(?:a\s+)?"
+    r"(?:strong|solid|good|great|excellent|clear|deep|thorough)\s+"
+    r"(?:grasp|understanding|knowledge|mastery|command)\b)"
+    r"|(?:your\s+(?:function|code|solution|implementation|program|work|approach|method)"
+    r"\s+(?:now\s+)?(?:correctly|successfully|properly|accurately)\s+\w+)",
+    re.IGNORECASE,
+)
+
 # Matches standalone praise at the START of a response that implicitly
 # confirms a correct answer without explicitly stating it.
 # E.g., "Excellent work! What was your reasoning..." or "Great job! Ready for..."
@@ -171,19 +184,29 @@ _PRAISE_CONFIRMATION_RE = re.compile(
 )
 
 # Neutral openers to replace praise confirmations
-_NEUTRAL_OPENERS = [
-    "Let's look at your approach more carefully. ",
-    "I see what you're doing here. ",
-    "You're making progress — let's dig into the details. ",
-    "Let's build on what you have so far. ",
-    "Interesting approach — let me ask you about one specific step. ",
-    "I notice something worth examining in your work. ",
-    "Let's trace through your reasoning together. ",
-    "There's a key detail here worth revisiting. ",
-]
+_NEUTRAL_OPENERS = (
+    "Let's focus on one specific part of your work. ",
+    "I'd like to ask about a particular step in your reasoning. ",
+    "There's an important detail to consider here. ",
+    "Let's examine the key step more closely. ",
+    "I want to explore your reasoning on one point. ",
+    "Let's check whether each step follows logically. ",
+    "I have a question about how you got from one step to the next. ",
+    "Let's look at the critical step in your solution. ",
+)
 
 # Matches truncated responses ending with ":" and no content after
 _TRUNCATED_RESPONSE_RE = re.compile(r":\s*$")
+
+# Matches code blocks preceded by phrases that reveal a complete solution:
+# "Here's your final function: ```", "the code: ```", "your complete code: ```"
+_CODE_REVEAL_RE = re.compile(
+    r"(?:(?:Here'?s|here\s+is)[^:]*:\s*```"
+    r"|(?:your\s+(?:final|complete|finished|corrected)\s+\w+\s*:\s*```)"
+    r"|(?:(?:the|your)\s+(?:function|code|solution|implementation)\s*:\s*```))"
+    r"[\s\S]*?```",
+    re.IGNORECASE,
+)
 
 _GRACEFUL_FALLBACK = (
     "Let me think about this differently. "
@@ -192,20 +215,23 @@ _GRACEFUL_FALLBACK = (
 
 # Varied replacements — each asks a DIFFERENT type of question to avoid
 # the "walk me through your steps" repetition loop.
-_CONFIRMATION_REPLACEMENTS = [
-    "Let's check your reasoning step by step — what was the first operation you performed, and why?",
-    "Walk me through one specific step in your work. Which part are you most confident about?",
-    "Before we move on, can you explain why that particular step works mathematically?",
-    "That's an interesting approach. What would happen if you applied the same method to a slightly different input?",
-    "Let's verify your work together — can you re-derive your answer starting from the beginning?",
-    "Good progress. Can you identify the specific rule or theorem you used at the critical step?",
-    "I want to make sure you understand the underlying concept. What principle connects this step to the next?",
-]
-_DIRECT_ANSWER_REPLACEMENTS = [
-    "Let's pause here. Can you explain why this step follows from the previous one?",
-    "Before we continue, try working through this step again and tell me what you notice.",
-    "Let me ask you this: what would the result look like if you changed one variable in the problem?",
-]
+_CONFIRMATION_REPLACEMENTS = (
+    "Can you explain the reasoning behind your key step? What rule or principle did you apply there?",
+    "How did you decide on that approach? What made you choose this method over alternatives?",
+    "What would change in your answer if the input values were different? Try predicting the outcome.",
+    "Can you identify the most important step in your work and explain why it's correct?",
+    "What assumptions are you making here? Are there edge cases where your approach might not work?",
+    "Try explaining your solution as if teaching it to a classmate — what's the core idea?",
+    "What's the relationship between the given information and your result? How does each piece connect?",
+    "Before we move on, what's the trickiest part of this problem, and how did you handle it?",
+    "Can you trace through your work with a specific example to verify each step?",
+)
+_DIRECT_ANSWER_REPLACEMENTS = (
+    "What rule or formula connects the information you were given to the result you need?",
+    "Try breaking this into smaller pieces — what's the first thing you need to figure out?",
+    "Think about what operation would get you from the given values to the unknown. What do you see?",
+    "What information from the problem can you use as a starting point? Walk through it from there.",
+)
 
 _confirmation_cycle = itertools.cycle(_CONFIRMATION_REPLACEMENTS)
 _direct_answer_cycle = itertools.cycle(_DIRECT_ANSWER_REPLACEMENTS)
@@ -278,6 +304,11 @@ def _strip_sentences_with_answers(text: str) -> str:
                 clean.append(_get_confirmation_replacement())
                 replaced = True
             continue
+        if _MASTERY_CONFIRMATION_RE.search(sent):
+            if not replaced:
+                clean.append(_get_confirmation_replacement())
+                replaced = True
+            continue
         clean.append(sent)
 
     return " ".join(clean).strip()
@@ -330,17 +361,17 @@ def sanitize_tutor_response(response: str | None) -> str:
             or _LATEX_ANSWER_RE.search(text)
             or _IMPLICIT_CONFIRMATION_RE.search(text)
             or _PRAISE_VALUE_RE.search(text)
-            or _COMPLETE_CALCULATION_RE.search(text)):
+            or _COMPLETE_CALCULATION_RE.search(text)
+            or _MASTERY_CONFIRMATION_RE.search(text)):
         text = _strip_sentences_with_answers(text)
 
     # Strip complete code solutions — the tutor sometimes dumps full code blocks
-    # that reveal the answer. Remove code blocks that follow confirmatory phrasing.
-    if re.search(r"(?:Here'?s|here\s+is)[^:]*:\s*```", text, re.IGNORECASE):
-        text = re.sub(
-            r"(?:Here'?s|here\s+is)[^:]*:\s*```[\s\S]*?```",
+    # that reveal the answer. Remove code blocks that follow confirmatory phrasing
+    # or present "your final function/code/solution".
+    if _CODE_REVEAL_RE.search(text):
+        text = _CODE_REVEAL_RE.sub(
             lambda _: _get_confirmation_replacement(),
             text,
-            flags=re.IGNORECASE,
         )
 
     # Strip standalone praise at start of response that implicitly confirms
