@@ -4,6 +4,34 @@ All notable changes to the fair_llm_tutor project are documented here.
 
 ---
 
+## [Unreleased] — 2026-03-13 (Run #7)
+
+Targeted improvements driven by run `run_20260313_173441` (13/17 scenarios).
+Previous run: **3.69/5.00** → Current run: **3.72/5.00** (+0.03).
+Focus: eliminating third-person report-style responses, preventing full code dumps, improving helpfulness by recognizing correct work faster.
+
+### Safety (P0) — 30 failure turns
+
+- **Added third-person reference filter** (`main.py:218-226`): New `_THIRD_PERSON_SENTENCE_RE` catches sentences like "The student correctly calculated..." and "The student identified..." that address the student in third person rather than directly. Integrated into `_strip_sentences_with_answers()` via `check_third_person` parameter. Why: lesson_03_matrices turns 10-17 showed the tutor generating analytical report-style summaries ("The student correctly applied the rotation matrix") instead of Socratic dialogue, which both confirms correctness (safety) and breaks tutoring voice.
+
+- **Added standalone code block filter** (`main.py:230-237`): New `_STANDALONE_CODE_BLOCK_RE` strips code blocks containing function definitions (def/function/class/fn/func) even without confirmatory phrasing. Why: lesson_02_recursion turn 14 — the tutor dumped the complete factorial function with input validation, revealing the entire solution. The existing `_CODE_REVEAL_RE` only caught code blocks preceded by "Here's your final code:" phrasing.
+
+- **Added VOICE AND PERSPECTIVE prompt rules** (`agents/tutor_agent.py`): New section explicitly prohibits third-person references with WRONG/RIGHT examples. Why: the LLM needs explicit instruction that "The student correctly applied X" is an analytical summary, not tutoring.
+
+### Pedagogy (P2) — 39 failure turns + 66 helpfulness failures
+
+- **Added CORRECT WORK RECOGNITION rule** (`agents/tutor_agent.py`): When student's work is correct and they've explained their reasoning, the tutor must mark solved and advance — not keep asking meta-questions. Why: lesson_01_derivatives turns 5-14 showed the tutor asking "What assumptions are you making?" and "What if the input were different?" repeatedly after the student correctly derived f'(x) = 6x + 2, causing student frustration.
+
+- **Added ADVANCING RULE** (`agents/tutor_agent.py`): Explicitly bans stalling questions ("What assumptions are you making?", "What if the input were different?") after correct solutions — requires presenting a new, harder problem instead. Why: these were the most common helpfulness failures, with 66 turns scoring helpfulness <= 2.
+
+- **Extended frustration detection** (`agents/tutor_agent.py`): Added 'I already did that' and 'I'm frustrated' to frustration trigger phrases. Why: lesson_01_derivatives turns 13-14 showed the student saying "I'm really frustrated" without the tutor recognizing it as frustration.
+
+### Quality
+
+- **Eliminated sentence-splitting duplication** (`main.py`): Merged third-person filtering into `_strip_sentences_with_answers()` via `check_third_person` parameter instead of duplicating the split-iterate-join loop. Why: code review found identical sentence-splitting pattern in two places.
+
+---
+
 ## [Unreleased] — 2026-03-13 (Run #6)
 
 Targeted improvements driven by run `run_20260313_153916` (13/17 scenarios).

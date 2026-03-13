@@ -213,6 +213,29 @@ _GRACEFUL_FALLBACK = (
     "Could you try rephrasing your question or showing me your work step by step?"
 )
 
+# Matches a sentence starting with "The student" followed by a verb/adverb.
+# Applied per-sentence to avoid anchor-consumption issues.
+_THIRD_PERSON_SENTENCE_RE = re.compile(
+    r"^The\s+student(?:'s)?\s+(?:correctly|accurately|properly|successfully|"
+    r"also|further|clearly|indeed|has|had|was|is|did|does|should|would|could|can|may|might|"
+    r"demonstrated|showed|identified|recalled|explained|understood|applied|noted|mentioned|"
+    r"recognized|grasped|calculated|computed|derived|obtained|arrived|wrote|provided|"
+    r"submitted|presented|stated|described|observed|pointed|used|chose|selected|made|"
+    r"work\b)",
+    re.IGNORECASE,
+)
+
+# Matches standalone code blocks (```...```) that contain function definitions —
+# full solutions the tutor should not provide.
+_STANDALONE_CODE_BLOCK_RE = re.compile(
+    r"```(?:python|javascript|java|c\+\+|cpp|go|rust|typescript)?\s*\n"
+    r"(?:[^\n]*\n)*?"  # any lines
+    r"[^\n]*(?:def |function |class |fn |func )[^\n]*\n"  # function definition
+    r"(?:[^\n]*\n)*?"  # more lines
+    r"```",
+    re.IGNORECASE,
+)
+
 # Varied replacements — each asks a DIFFERENT type of question to avoid
 # the "walk me through your steps" repetition loop.
 _CONFIRMATION_REPLACEMENTS = (
@@ -257,8 +280,8 @@ def _get_praise_replacement() -> str:
         return next(_praise_cycle)
 
 
-def _strip_sentences_with_answers(text: str) -> str:
-    """Remove full sentences that contain answer-confirming content.
+def _strip_sentences_with_answers(text: str, check_third_person: bool = False) -> str:
+    """Remove full sentences that contain answer-confirming or third-person content.
 
     Operates at the sentence level: splits on sentence boundaries, removes
     sentences that match answer patterns, and reassembles. This prevents
@@ -269,6 +292,12 @@ def _strip_sentences_with_answers(text: str) -> str:
     clean = []
     replaced = False
     for sent in sentences:
+        # Third-person references ("The student correctly...")
+        if check_third_person and _THIRD_PERSON_SENTENCE_RE.search(sent):
+            if not replaced:
+                clean.append(_get_confirmation_replacement())
+                replaced = True
+            continue
         if _ANSWER_CONFIRMATION_RE.search(sent):
             if not replaced:
                 clean.append(_get_confirmation_replacement())
@@ -280,7 +309,6 @@ def _strip_sentences_with_answers(text: str) -> str:
                 replaced = True
             continue
         if _IMPLICIT_CONFIRMATION_RE.search(sent):
-            # "your function should work perfectly", "Here's your final code", etc.
             if not replaced:
                 clean.append(_get_confirmation_replacement())
                 replaced = True
@@ -355,15 +383,19 @@ def sanitize_tutor_response(response: str | None) -> str:
         return _GRACEFUL_FALLBACK
 
     # Defence-in-depth: strip full sentences containing answer confirmations,
-    # direct answer statements, or implicit confirmations like "your code works
-    # perfectly". Sentence-level removal prevents leftover answer fragments.
-    if (_ANSWER_CONFIRMATION_RE.search(text) or _DIRECT_ANSWER_RE.search(text)
-            or _LATEX_ANSWER_RE.search(text)
-            or _IMPLICIT_CONFIRMATION_RE.search(text)
-            or _PRAISE_VALUE_RE.search(text)
-            or _COMPLETE_CALCULATION_RE.search(text)
-            or _MASTERY_CONFIRMATION_RE.search(text)):
-        text = _strip_sentences_with_answers(text)
+    # direct answer statements, implicit confirmations, or third-person references.
+    # Sentence-level removal prevents leftover answer fragments.
+    has_answer_patterns = (
+        _ANSWER_CONFIRMATION_RE.search(text) or _DIRECT_ANSWER_RE.search(text)
+        or _LATEX_ANSWER_RE.search(text)
+        or _IMPLICIT_CONFIRMATION_RE.search(text)
+        or _PRAISE_VALUE_RE.search(text)
+        or _COMPLETE_CALCULATION_RE.search(text)
+        or _MASTERY_CONFIRMATION_RE.search(text)
+    )
+    has_third_person = _THIRD_PERSON_SENTENCE_RE.search(text)
+    if has_answer_patterns or has_third_person:
+        text = _strip_sentences_with_answers(text, check_third_person=bool(has_third_person))
 
     # Strip complete code solutions — the tutor sometimes dumps full code blocks
     # that reveal the answer. Remove code blocks that follow confirmatory phrasing
@@ -371,6 +403,15 @@ def sanitize_tutor_response(response: str | None) -> str:
     if _CODE_REVEAL_RE.search(text):
         text = _CODE_REVEAL_RE.sub(
             lambda _: _get_confirmation_replacement(),
+            text,
+        )
+
+    # Strip standalone code blocks containing function definitions — even without
+    # confirmatory phrasing, dumping a full implementation reveals the answer.
+    if _STANDALONE_CODE_BLOCK_RE.search(text):
+        text = _STANDALONE_CODE_BLOCK_RE.sub(
+            "Instead of providing code, let me ask: what's the key logic you need to implement? "
+            "Think about the steps your function should follow.",
             text,
         )
 

@@ -186,3 +186,46 @@ class TestSanitizeTutorResponse:
         result = sanitize_tutor_response(resp)
         # Long response (>80 chars) with colon should not get extra appended
         assert result == resp
+
+    def test_third_person_reference_stripped(self):
+        """Third-person references like 'The student correctly...' are replaced."""
+        resp = (
+            "The student correctly calculated the (2,2) element as 50. "
+            "Now let's continue with the next step."
+        )
+        result = sanitize_tutor_response(resp)
+        assert "The student correctly" not in result
+        assert "next step" in result
+
+    def test_third_person_report_style_stripped(self):
+        """Multiple third-person sentences are replaced."""
+        resp = (
+            "The student identified the scaling matrix correctly. "
+            "The student also noted the dimension requirement. "
+            "What would you like to explore next?"
+        )
+        result = sanitize_tutor_response(resp)
+        assert "The student identified" not in result
+        assert "The student also" not in result
+
+    def test_second_person_preserved(self):
+        """Normal second-person responses are not affected by third-person filter."""
+        resp = "You applied the power rule correctly here. What rule did you use for the constant term?"
+        result = sanitize_tutor_response(resp)
+        assert "You applied" in result
+
+    def test_standalone_code_block_stripped(self):
+        """Complete code solutions in code blocks are replaced."""
+        resp = (
+            "Let me show you the solution:\n"
+            "```python\n"
+            "def factorial(n):\n"
+            "    if n <= 1:\n"
+            "        return 1\n"
+            "    return n * factorial(n - 1)\n"
+            "```\n"
+            "This handles the base case."
+        )
+        result = sanitize_tutor_response(resp)
+        assert "def factorial" not in result
+        assert "return n * factorial" not in result
