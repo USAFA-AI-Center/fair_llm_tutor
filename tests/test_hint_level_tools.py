@@ -8,17 +8,17 @@ class TestGetHintLevel:
     def setup_method(self):
         self.tool = GetHintLevelTool()
 
-    def test_critical_maps_to_level_2(self):
+    def test_critical_maps_to_level_3(self):
         result = self.tool.use(json.dumps({"severity": "Critical"}))
-        assert "Hint Level: 2" in result
+        assert "Hint Level: 3" in result
 
     def test_major_maps_to_level_2(self):
         result = self.tool.use(json.dumps({"severity": "Major"}))
         assert "Hint Level: 2" in result
 
-    def test_minor_maps_to_level_3(self):
+    def test_minor_maps_to_level_1(self):
         result = self.tool.use(json.dumps({"severity": "Minor"}))
-        assert "Hint Level: 3" in result
+        assert "Hint Level: 1" in result
 
     def test_unknown_severity_defaults_to_2(self):
         result = self.tool.use(json.dumps({"severity": "Unknown"}))
@@ -55,7 +55,7 @@ class TestGetHintLevel:
 
     def test_includes_description(self):
         result = self.tool.use(json.dumps({"severity": "Minor"}))
-        assert "Targeted Socratic question" in result
+        assert "General conceptual reminder" in result
 
     def test_all_levels_have_descriptions(self):
         for level in range(1, 6):
@@ -75,9 +75,9 @@ class TestGetHintLevel:
 
     def test_case_insensitive_severity(self):
         result = self.tool.use(json.dumps({"severity": "CRITICAL"}))
-        assert "Hint Level: 2" in result
-        result = self.tool.use(json.dumps({"severity": "minor"}))
         assert "Hint Level: 3" in result
+        result = self.tool.use(json.dumps({"severity": "minor"}))
+        assert "Hint Level: 1" in result
 
 
 class TestHintEscalation:
@@ -127,9 +127,9 @@ class TestHintEscalation:
     def test_level_5_includes_escalation_guidance(self):
         """Level 5 should include guidance about worked analogous example."""
         tool = GetHintLevelTool(escalation_threshold=1)
-        # With threshold=1, second hint should escalate
-        tool.use(json.dumps({"severity": "Minor", "problem_id": "p"}))
-        tool.use(json.dumps({"severity": "Minor", "problem_id": "p"}))
+        # With threshold=1, each call escalates: base=1 → 2 → 3 → 4 → 5
+        for _ in range(4):
+            tool.use(json.dumps({"severity": "Minor", "problem_id": "p"}))
         result = tool.use(json.dumps({"severity": "Minor", "problem_id": "p"}))
         assert "Hint Level: 5" in result
         assert "ESCALATION" in result
@@ -166,7 +166,7 @@ class TestHintEscalation:
         r1 = self.tool.use(json.dumps({"severity": "Major", "problem_id": "prob1"}))
         r2 = self.tool.use(json.dumps({"severity": "Minor", "problem_id": "prob2"}))
         assert "Hint Level: 2" in r1
-        assert "Hint Level: 3" in r2
+        assert "Hint Level: 1" in r2
 
 
 class TestMarkComplete:
@@ -203,7 +203,7 @@ class TestMarkComplete:
             "mark_complete": True,
             "severity": "Minor",
         }))
-        assert "Hint Level: 3" in result
+        assert "Hint Level: 1" in result
 
     def test_mark_complete_false_gives_normal_hint(self):
         """mark_complete=False should not trigger completion."""

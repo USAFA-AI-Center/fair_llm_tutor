@@ -249,7 +249,7 @@ class TestHintEscalationEdgeCases:
         result = self.tool.use(json.dumps({
             "severity": "Minor", "hint_level_override": 1
         }))
-        assert "Hint Level: 1" in result  # Override wins over Minor→3
+        assert "Hint Level: 1" in result  # Override wins over Minor→1
 
 
 # ============================================================================

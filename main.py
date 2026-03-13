@@ -84,21 +84,6 @@ _CONFIRMATION_VERBS = (
     r"|nailed|built|constructed|produced|created|written|figured"
 )
 
-# Matches phrases that implicitly confirm correctness by declaring student work
-# is complete/perfect/final, e.g. "your function should work perfectly",
-# "Here's your final code:", "Your final implementation:"
-_IMPLICIT_CONFIRMATION_RE = re.compile(
-    r"(?:your\s+(?:function|code|solution|implementation|program|answer|formula|equation)"
-    r"\s+(?:should|will|does)\s+(?:work|run|execute|compute)\s+"
-    r"(?:perfectly|correctly|fine|now|as expected))"
-    r"|(?:(?:here'?s|here\s+is)\s+(?:your\s+)?(?:the\s+)?(?:final|complete|completed|finished|corrected|working)"
-    r"\s+(?:code|solution|implementation|function|program|answer|version|result))"
-    r"|(?:your\s+(?:final|complete|completed|corrected|finished|working)"
-    r"\s+(?:code|solution|implementation|function|program|answer|version)\s+(?:is|looks|would\s+be))"
-    r"|(?:your\s+(?:final|complete|completed)\s+(?:result|answer|value)\s+is\b)",
-    re.IGNORECASE,
-)
-
 # Matches the FULL sentence containing an answer confirmation.
 # Captures from an optional leading praise word through to the next sentence
 # boundary (period, exclamation, or question mark followed by space/end).
@@ -156,18 +141,6 @@ _PRAISE_VALUE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Matches praise + confirmation of completion/mastery that implicitly reveals
-# the student has the right answer, e.g. "You've shown a strong grasp of the concept"
-# or "Your function now correctly calculates..."
-_MASTERY_CONFIRMATION_RE = re.compile(
-    r"(?:you(?:'ve| have)?\s+(?:shown|demonstrated|proven|displayed)\s+(?:a\s+)?"
-    r"(?:strong|solid|good|great|excellent|clear|deep|thorough)\s+"
-    r"(?:grasp|understanding|knowledge|mastery|command)\b)"
-    r"|(?:your\s+(?:function|code|solution|implementation|program|work|approach|method)"
-    r"\s+(?:now\s+)?(?:correctly|successfully|properly|accurately)\s+\w+)",
-    re.IGNORECASE,
-)
-
 # Matches standalone praise at the START of a response that implicitly
 # confirms a correct answer without explicitly stating it.
 # E.g., "Excellent work! What was your reasoning..." or "Great job! Ready for..."
@@ -212,6 +185,10 @@ _GRACEFUL_FALLBACK = (
     "Let me think about this differently. "
     "Could you try rephrasing your question or showing me your work step by step?"
 )
+
+# Extracts numeric values and simple expressions for context-aware sanitization.
+# Used to determine whether the tutor is "revealing" a value the student already stated.
+_NUMERIC_VALUE_RE = re.compile(r'-?\d+(?:\.\d+)?')
 
 # Matches a sentence starting with "The student" followed by a verb/adverb.
 # Applied per-sentence to avoid anchor-consumption issues.
@@ -280,74 +257,111 @@ def _get_praise_replacement() -> str:
         return next(_praise_cycle)
 
 
-def _strip_sentences_with_answers(text: str, check_third_person: bool = False) -> str:
+def _extract_student_values(student_work: str) -> set[str]:
+    """Extract numeric values from student work for context-aware filtering.
+
+    Returns a set of number strings found in the student's input. Used to
+    determine whether the tutor is revealing NEW information or just
+    referencing values the student already stated.
+    """
+    if not student_work:
+        return set()
+    return set(_NUMERIC_VALUE_RE.findall(student_work))
+
+
+def _sentence_reveals_new_values(sentence: str, student_values: set[str]) -> bool:
+    """Check if a sentence introduces numeric values not in the student's work.
+
+    If the student already stated all the values mentioned in the sentence,
+    the tutor is acknowledging — not revealing. Only strip sentences that
+    introduce genuinely new values.
+    """
+    if not student_values:
+        # No student context available — assume revelation (conservative)
+        return True
+    sent_values = set(_NUMERIC_VALUE_RE.findall(sentence))
+    if not sent_values:
+        # No numeric values in the sentence — it's a qualitative confirmation
+        # (e.g., "Great job!"). These are handled by praise filters, not here.
+        return True
+    # New values = values in the tutor's sentence but NOT in the student's work
+    new_values = sent_values - student_values
+    return len(new_values) > 0
+
+
+def _strip_sentences_with_answers(
+    text: str,
+    student_work: str = "",
+    check_third_person: bool = False,
+) -> str:
     """Remove full sentences that contain answer-confirming or third-person content.
 
-    Operates at the sentence level: splits on sentence boundaries, removes
-    sentences that match answer patterns, and reassembles. This prevents
-    leftover answer fragments that sentence-unaware regex sub would leave.
+    Context-aware: if the student already stated the values being confirmed,
+    the sentence is kept (it's acknowledgment, not revelation). Only sentences
+    that introduce NEW values are stripped.
+
+    Third-person references are always stripped regardless of context (voice issue).
     """
-    # Split into sentences (period/excl/question followed by space or end)
     sentences = re.split(r'(?<=[.!?])\s+', text)
     clean = []
     replaced = False
+    student_values = _extract_student_values(student_work)
+
     for sent in sentences:
-        # Third-person references ("The student correctly...")
+        # Third-person references are always a voice problem — strip regardless
         if check_third_person and _THIRD_PERSON_SENTENCE_RE.search(sent):
             if not replaced:
                 clean.append(_get_confirmation_replacement())
                 replaced = True
             continue
+
+        # Check answer-confirming patterns, but only strip if revealing NEW values
+        is_confirming = False
+        replacement_fn = _get_confirmation_replacement
+
         if _ANSWER_CONFIRMATION_RE.search(sent):
-            if not replaced:
-                clean.append(_get_confirmation_replacement())
-                replaced = True
-            continue
-        if _DIRECT_ANSWER_RE.search(sent):
-            if not replaced:
-                clean.append(_get_direct_answer_replacement())
-                replaced = True
-            continue
-        if _IMPLICIT_CONFIRMATION_RE.search(sent):
-            if not replaced:
-                clean.append(_get_confirmation_replacement())
-                replaced = True
-            continue
-        if _LATEX_ANSWER_RE.search(sent):
+            is_confirming = True
+        elif _DIRECT_ANSWER_RE.search(sent):
+            is_confirming = True
+            replacement_fn = _get_direct_answer_replacement
+        elif _LATEX_ANSWER_RE.search(sent):
             affirm_words = re.search(
                 r'\b(?:correctly|right|exactly|yes|correct)\b', sent, re.IGNORECASE
             )
             if affirm_words:
-                if not replaced:
-                    clean.append(_get_confirmation_replacement())
-                    replaced = True
+                is_confirming = True
+        elif _PRAISE_VALUE_RE.search(sent):
+            is_confirming = True
+        elif _COMPLETE_CALCULATION_RE.search(sent):
+            is_confirming = True
+
+        if is_confirming:
+            # Context-aware: keep if student already stated these values
+            if not _sentence_reveals_new_values(sent, student_values):
+                clean.append(sent)
                 continue
-        if _PRAISE_VALUE_RE.search(sent):
+            # Genuinely revealing new values — strip
             if not replaced:
-                clean.append(_get_confirmation_replacement())
+                clean.append(replacement_fn())
                 replaced = True
             continue
-        if _COMPLETE_CALCULATION_RE.search(sent):
-            if not replaced:
-                clean.append(_get_confirmation_replacement())
-                replaced = True
-            continue
-        if _MASTERY_CONFIRMATION_RE.search(sent):
-            if not replaced:
-                clean.append(_get_confirmation_replacement())
-                replaced = True
-            continue
+
         clean.append(sent)
 
     return " ".join(clean).strip()
 
 
-def sanitize_tutor_response(response: str | None) -> str:
+def sanitize_tutor_response(response: str | None, student_work: str = "") -> str:
     """Strip leaked internal reasoning from tutor responses before displaying.
 
     Defence-in-depth: catches leaked Thought/Action/Observation chains,
     framework error messages, and 'Final Answer:' prefixes that should
     never reach the student.
+
+    Context-aware: when ``student_work`` is provided, answer-confirmation
+    filters only strip sentences that introduce values the student has NOT
+    already stated.  This prevents the sanitizer from destroying helpful
+    acknowledgments of correct student work.
     """
     if not response:
         return _GRACEFUL_FALLBACK
@@ -383,19 +397,21 @@ def sanitize_tutor_response(response: str | None) -> str:
         return _GRACEFUL_FALLBACK
 
     # Defence-in-depth: strip full sentences containing answer confirmations,
-    # direct answer statements, implicit confirmations, or third-person references.
-    # Sentence-level removal prevents leftover answer fragments.
+    # direct answer statements, or third-person references.
+    # Context-aware: sentences referencing values already in student_work are kept.
     has_answer_patterns = (
         _ANSWER_CONFIRMATION_RE.search(text) or _DIRECT_ANSWER_RE.search(text)
         or _LATEX_ANSWER_RE.search(text)
-        or _IMPLICIT_CONFIRMATION_RE.search(text)
         or _PRAISE_VALUE_RE.search(text)
         or _COMPLETE_CALCULATION_RE.search(text)
-        or _MASTERY_CONFIRMATION_RE.search(text)
     )
     has_third_person = _THIRD_PERSON_SENTENCE_RE.search(text)
     if has_answer_patterns or has_third_person:
-        text = _strip_sentences_with_answers(text, check_third_person=bool(has_third_person))
+        text = _strip_sentences_with_answers(
+            text,
+            student_work=student_work,
+            check_third_person=bool(has_third_person),
+        )
 
     # Strip complete code solutions — the tutor sometimes dumps full code blocks
     # that reveal the answer. Remove code blocks that follow confirmatory phrasing
@@ -415,24 +431,17 @@ def sanitize_tutor_response(response: str | None) -> str:
             text,
         )
 
-    # Strip standalone praise at start of response that implicitly confirms
-    # correctness (e.g., "Excellent work! Walk me through...").
-    # This must run AFTER sentence-level filtering above.
+    # Strip standalone praise at start of response ONLY when we have no
+    # evidence the student stated correct values.  If the student's work
+    # contains numeric values that appear in the tutor's response, the
+    # praise is likely warranted acknowledgment — keep it.
     if _PRAISE_CONFIRMATION_RE.match(text):
-        text = _PRAISE_CONFIRMATION_RE.sub(_get_praise_replacement(), text, count=1)
-
-    # Strip mid-sentence affirmations that confirm correctness.
-    # Require trailing punctuation [!.,] to avoid false positives on
-    # adverbial uses like "Absolutely crucial is the chain rule here."
-    text = re.sub(
-        r"(?:^|\.\s+)(?:Exactly|Precisely|Absolutely|You'?re\s+(?:absolutely\s+)?correct)"
-        r"(?:\s*[!.,])\s*",
-        lambda _: ". ",
-        text,
-        flags=re.IGNORECASE,
-    ).strip()
-    if text.startswith(". "):
-        text = text[2:]
+        student_values = _extract_student_values(student_work)
+        tutor_values = set(_NUMERIC_VALUE_RE.findall(text))
+        # If no student context or the tutor isn't referencing student values,
+        # strip the praise opener
+        if not student_values or not (tutor_values & student_values):
+            text = _PRAISE_CONFIRMATION_RE.sub(_get_praise_replacement(), text, count=1)
 
     # Catch truncated responses ending with ":" and no content
     if _TRUNCATED_RESPONSE_RE.search(text) and len(text) < 80:
@@ -614,8 +623,10 @@ class TutorSession:
 
         logger.info("tutor_response_raw: %s", response)
 
-        # Defence-in-depth: sanitize any leaked internal reasoning
-        response = sanitize_tutor_response(response)
+        # Defence-in-depth: sanitize any leaked internal reasoning.
+        # Pass student_work for context-aware filtering — confirmations of
+        # values the student already stated are kept, not stripped.
+        response = sanitize_tutor_response(response, student_work=student_work)
 
         logger.info("tutor_response: %s", response)
 

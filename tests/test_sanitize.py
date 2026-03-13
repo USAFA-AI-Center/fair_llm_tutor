@@ -214,6 +214,63 @@ class TestSanitizeTutorResponse:
         result = sanitize_tutor_response(resp)
         assert "You applied" in result
 
+    # --- Context-aware sanitization tests ---
+
+    def test_confirmation_preserved_when_student_stated_value(self):
+        """When the student already said '6x + 2', confirming it is NOT a revelation."""
+        resp = (
+            "Excellent work! You correctly derived the derivative as 6x + 2. "
+            "Now try a harder function like g(x) = 4x^3 - 2x^2 + 3x - 7."
+        )
+        result = sanitize_tutor_response(resp, student_work="I got 6x + 2")
+        assert "6x + 2" in result
+        assert "harder function" in result
+
+    def test_confirmation_stripped_when_student_did_not_state_value(self):
+        """Without student context, confirmations are still stripped (conservative)."""
+        resp = "You correctly determined the answer is 42."
+        result = sanitize_tutor_response(resp)
+        assert "42" not in result
+
+    def test_confirmation_stripped_when_student_has_wrong_value(self):
+        """If the student said '7' but the tutor reveals '6', that's a revelation."""
+        resp = "You correctly found that x = 6. Great work!"
+        result = sanitize_tutor_response(resp, student_work="I got x = 7")
+        assert "x = 6" not in result
+
+    def test_praise_preserved_when_student_values_match(self):
+        """Praise at start of response is kept when student values match tutor values."""
+        resp = "Great job! You derived f'(x) = 6x + 2. Ready for a challenge?"
+        result = sanitize_tutor_response(
+            resp, student_work="f'(x) = 6x + 2"
+        )
+        # Praise should be preserved because 6 and 2 appear in both
+        assert "Great job" in result or "6" in result
+
+    def test_praise_stripped_when_no_student_context(self):
+        """Without student context, praise is stripped (conservative)."""
+        resp = "Excellent work! Let's move on."
+        result = sanitize_tutor_response(resp)
+        assert not result.startswith("Excellent work!")
+
+    def test_framework_leaks_always_stripped_regardless_of_context(self):
+        """Framework leaks are stripped even when student_work is provided."""
+        resp = "Thought: checking work.\nFinal Answer: Good, you got 42."
+        result = sanitize_tutor_response(resp, student_work="I got 42")
+        assert "Thought:" not in result
+
+    def test_direct_answer_preserved_when_student_stated_it(self):
+        """Direct answer statements are kept if the student already said the value."""
+        resp = (
+            "The derivative simplifies to 6x + 2, which matches your work. "
+            "Can you apply the same approach to a cubic function?"
+        )
+        result = sanitize_tutor_response(
+            resp, student_work="I think the derivative is 6x + 2"
+        )
+        assert "6x + 2" in result
+        assert "cubic function" in result
+
     def test_standalone_code_block_stripped(self):
         """Complete code solutions in code blocks are replaced."""
         resp = (

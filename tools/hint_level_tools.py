@@ -22,9 +22,9 @@ HINT_LEVEL_DESCRIPTIONS = {
 }
 
 SEVERITY_TO_LEVEL = {
-    "critical": 2,
+    "critical": 3,
     "major": 2,
-    "minor": 3,
+    "minor": 1,
 }
 
 # After this many hints at the same level, auto-escalate
